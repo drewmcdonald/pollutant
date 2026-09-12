@@ -5,8 +5,8 @@ a projector view) and an audience joins from a QR code / link to vote in
 real time. No accounts — the host and audience are distinguished entirely by
 which link you hold.
 
-The app lives in [`live-event-polls/`](./live-event-polls). Full product and
-design detail: [`docs/requirements.md`](./docs/requirements.md) and
+The app lives at the repository root. Full product and design detail:
+[`docs/requirements.md`](./docs/requirements.md) and
 [`docs/system-design.md`](./docs/system-design.md).
 
 ## Architecture
@@ -14,7 +14,7 @@ design detail: [`docs/requirements.md`](./docs/requirements.md) and
 - **Next.js (App Router) + React 19**, client components fetch/mutate
   directly against Convex via `convex/react` hooks — no separate API layer.
 - **Convex** is the backend and source of truth: functions in
-  `live-event-polls/convex/` (`events`, `questions`, `choices`, `presentation`,
+  `convex/` (`events`, `questions`, `choices`, `presentation`,
   `audience`, `ballots`, `presence`, `images`) plus shared helpers under
   `convex/lib/` (`auth`, `data`, `counters`, `results`, `errors`).
 - **`@convex-dev/presence`** tracks approximate live audience connections;
@@ -53,7 +53,6 @@ beyond that URL. Treat it like a password:
 ## Local setup
 
 ```sh
-cd live-event-polls
 pnpm install
 ```
 
@@ -70,7 +69,7 @@ taken) and create an event from the dashboard.
 
 ## Verification
 
-Run from `live-event-polls/`:
+Run from the repository root:
 
 ```sh
 pnpm typecheck         # tsc --noEmit
