@@ -23,7 +23,8 @@ const audienceQuestionValidator = v.object({
   minSelections: v.number(),
   maxSelections: v.number(),
   countdownSeconds: v.optional(v.number()),
-  votingOpenedAt: v.number(),
+  votingOpenedAt: v.optional(v.number()),
+  votingState: v.union(v.literal("open"), v.literal("closed")),
   ballotCount: v.number(),
   choices: v.array(audienceChoiceValidator),
 });
@@ -91,14 +92,15 @@ export const getCurrentState = query({
     }
 
     const question = await ctx.db.get(event.currentSlide.questionId);
+    const isOpen = question !== null && event.openQuestionId === question._id;
+    const isClosed =
+      question !== null && question.closedGeneration === event.generation;
     if (
       question === null ||
-      event.openQuestionId !== question._id ||
-      event.votingOpenedAt === undefined
+      question.archivedAt !== undefined ||
+      (!isOpen && !isClosed)
     ) {
-      // The slide points at a question, but it is not the one currently
-      // open for voting (not yet opened, or already closed). Audience
-      // states collapse this to "waiting" (system-design.md section 10.4).
+      // Unstarted questions remain private until the host opens voting.
       return {
         kind: "waiting" as const,
         eventTitle: event.title,
@@ -141,7 +143,8 @@ export const getCurrentState = query({
         minSelections: question.minSelections,
         maxSelections: question.maxSelections,
         countdownSeconds: question.countdownSeconds,
-        votingOpenedAt: event.votingOpenedAt,
+        votingOpenedAt: isOpen ? event.votingOpenedAt : undefined,
+        votingState: isOpen ? ("open" as const) : ("closed" as const),
         ballotCount: results.ballotCount,
         choices: results.choices.map((choice) => ({
           choiceId: choice.choiceId,

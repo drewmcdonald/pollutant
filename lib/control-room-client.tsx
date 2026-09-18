@@ -1,44 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import {
-  Component,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ChangeEvent,
-  type ReactNode,
-} from "react";
+import { useRouter } from "next/navigation";
+import { Component, useEffect, useState, type ReactNode } from "react";
 import { ConvexError } from "convex/values";
 import { useMutation, useQuery } from "convex/react";
-import {
-  Archive,
-  BarChart3,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  ChevronUp,
-  FlagTriangleRight,
-  Home,
-  ImageIcon,
-  Loader2,
-  MonitorPlay,
-  Plus,
-  RotateCcw,
-  Save,
-  Square,
-  Trash2,
-  X,
-} from "lucide-react";
-
+import type { FunctionReturnType } from "convex/server";
+import { ArrowDown, ArrowUp, MonitorPlay, Plus, Square } from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
+import { PageContainer } from "@/components/polls/page-container";
+import { PollEditor, type PollDraft } from "@/components/polls/poll-editor";
+import { SharePoll, CopyLinkButton } from "@/components/polls/share-poll";
+import { ResultsBar } from "@/components/polls/results-bar";
 import { VotingStatusBadge } from "@/components/polls/status-badge";
 import { Countdown } from "@/components/polls/countdown";
-import { PresencePill } from "@/components/polls/presence-pill";
-import { SecretPill } from "@/components/polls/secret-pill";
-import { PageContainer } from "@/components/polls/page-container";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -49,176 +25,36 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { rememberEvent } from "@/lib/remembered-events";
-import { cn } from "@/lib/utils";
+import { usePollImages } from "@/lib/use-poll-images";
 
 type Props = { publicSlug: string; hostSecret: string };
 type AppErrorData = { code?: string; message?: string };
-type Slide =
-  | { kind: "welcome" }
-  | { kind: "question"; questionId: Id<"questions"> }
-  | { kind: "finale" };
-
-/**
- * Mirrors `convex/questions.ts`'s `getHostDetail` return shape by name,
- * rather than deriving it via `FunctionReturnType<typeof ...>`, so this
- * type documents the contract directly instead of coupling to the query's
- * implementation reference.
- */
-type QuestionDetailQuestion = {
-  _id: Id<"questions">;
-  _creationTime: number;
-  eventId: Id<"events">;
-  position: number;
-  prompt: string;
-  imageUrl: string | null;
-  minSelections: number;
-  maxSelections: number;
-  countdownSeconds?: number;
-  responseGeneration: number;
-  closedGeneration?: number;
-  closedAt?: number;
-  archivedAt?: number;
+type QuestionDetail = FunctionReturnType<typeof api.questions.getHostDetail>;
+type QuestionView = {
+  selected?: FunctionReturnType<
+    typeof api.presentation.getDeck
+  >["questions"][number];
+  activeEditor: Id<"questions"> | "new" | null;
+  revision: number;
+  detail?: QuestionDetail;
+  results?: FunctionReturnType<typeof api.presentation.getQuestionResults>;
 };
-
-type QuestionDetailChoice = {
-  _id: Id<"choices">;
-  _creationTime: number;
-  questionId: Id<"questions">;
-  position: number;
-  label: string;
-  imageUrl: string | null;
-  archived: boolean;
-};
-
-type QuestionDetail = {
-  question: QuestionDetailQuestion;
-  choices: QuestionDetailChoice[];
-};
-
-type QuestionDraft = {
-  prompt: string;
-  minSelections: string;
-  maxSelections: string;
-  countdownSeconds: string;
-};
-
-type ChoiceDraft = { id: Id<"choices">; label: string };
-
-/** Tracks the in-flight upload's percentage, keyed the same way as `busy`
- * ("question-image" or `choice-image-${choiceId}`) so it's unambiguous
- * which image slot a percentage belongs to. */
-type UploadProgressState = { key: string; percent: number } | null;
-
-/** Matches `images.ts`'s server-enforced bound so the client rejects an
- * oversized file before ever starting the upload. */
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-
-function validateImageFile(file: File): string | null {
-  if (!file.type.startsWith("image/")) {
-    return "Please choose an image file.";
-  }
-  if (file.size > MAX_IMAGE_BYTES) {
-    return "Images must be 5 MiB or smaller.";
-  }
-  return null;
-}
-
-type UploadResponse = { storageId: Id<"_storage"> };
-
-function isUploadResponse(value: unknown): value is UploadResponse {
-  if (typeof value !== "object" || value === null) return false;
-  if (!("storageId" in value)) return false;
-  return typeof value.storageId === "string";
-}
-
-/**
- * POSTs `file` to `uploadUrl` and resolves with the parsed response body.
- * Uses `XMLHttpRequest` rather than `fetch`, which has no portable
- * upload-progress event - `xhr.upload.onprogress` is what lets
- * `onProgress` report a real 0-100 percentage while the bytes are still
- * uploading. Rejects with a clear, user-facing `Error` on a network
- * failure, an aborted request, a non-2xx response, or an unparsable body,
- * so every failure mode surfaces through the same error path as any other
- * action.
- */
-function uploadFileWithProgress(
-  uploadUrl: string,
-  file: File,
-  onProgress: (percent: number) => void,
-): Promise<UploadResponse> {
-  const { promise, resolve, reject } = Promise.withResolvers<UploadResponse>();
-  const xhr = new XMLHttpRequest();
-  xhr.open("POST", uploadUrl);
-  xhr.setRequestHeader("Content-Type", file.type);
-  xhr.upload.onprogress = (event) => {
-    if (event.lengthComputable) {
-      onProgress(Math.round((event.loaded / event.total) * 100));
-    }
-  };
-  xhr.onload = () => {
-    if (xhr.status < 200 || xhr.status >= 300) {
-      reject(new Error("Image upload failed. Try again."));
-      return;
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(xhr.responseText);
-    } catch {
-      reject(new Error("Image upload failed. Try again."));
-      return;
-    }
-    if (!isUploadResponse(parsed)) {
-      reject(new Error("Image upload failed. Try again."));
-      return;
-    }
-    resolve(parsed);
-  };
-  xhr.onerror = () =>
-    reject(
-      new Error("Image upload failed. Check your connection and try again."),
-    );
-  xhr.onabort = () => reject(new Error("Image upload was cancelled."));
-  xhr.send(file);
-  return promise;
-}
 
 function errorMessage(error: unknown): string {
-  if (error instanceof ConvexError) {
-    const data = error.data as AppErrorData;
-    return data.message ?? "That action could not be completed.";
-  }
-  if (error instanceof Error && error.message.length > 0) {
-    return error.message;
-  }
-  return "Could not reach the event service. Check your connection and try again.";
+  if (error instanceof ConvexError)
+    return (error.data as AppErrorData).message ?? "Couldn't save this poll.";
+  return "Couldn't reach the server. Please try again.";
 }
 
 function votingState(
-  event: {
-    generation: number;
-    openQuestionId?: Id<"questions">;
-  },
-  question: {
-    _id: Id<"questions">;
-    closedGeneration?: number;
-  },
+  event: { generation: number; openQuestionId?: Id<"questions"> },
+  question: { _id: Id<"questions">; closedGeneration?: number },
 ): "ready" | "open" | "closed" {
   if (event.openQuestionId === question._id) return "open";
   return question.closedGeneration === event.generation ? "closed" : "ready";
 }
-
-function displayQuestion(question: {
-  prompt: string;
-  position: number;
-}): string {
-  return question.prompt.trim() || `Untitled question ${question.position + 1}`;
-}
-
 class DeckErrorBoundary extends Component<
   { children: ReactNode },
   { error: unknown }
@@ -266,7 +102,9 @@ class DeckErrorBoundary extends Component<
   }
 }
 
-export function ControlRoomClient(props: Props) {
+export function ControlRoomClient(
+  props: Props & { startWithNewQuestion?: boolean },
+) {
   return (
     <DeckErrorBoundary>
       <ControlRoom {...props} />
@@ -274,1149 +112,714 @@ export function ControlRoomClient(props: Props) {
   );
 }
 
-function ControlRoom({ publicSlug, hostSecret }: Props) {
-  const deck = useQuery(api.presentation.getDeck, { publicSlug, hostSecret });
-  const presence = useQuery(api.presence.getConnectedCount, {
-    publicSlug,
-    hostSecret,
-  });
-  const updateDetails = useMutation(api.events.updateDetails);
-  const resetEvent = useMutation(api.events.reset);
-  const createQuestion = useMutation(api.questions.create);
-  const updateQuestion = useMutation(api.questions.update);
-  const removeQuestion = useMutation(api.questions.removeOrArchive);
-  const reorderQuestions = useMutation(api.questions.reorder);
-  const resetResponses = useMutation(api.questions.resetResponses);
-  const createChoice = useMutation(api.choices.create);
-  const updateChoice = useMutation(api.choices.update);
-  const removeChoice = useMutation(api.choices.removeOrArchive);
-  const reorderChoices = useMutation(api.choices.reorder);
+function ControlRoom({
+  publicSlug,
+  hostSecret,
+  startWithNewQuestion = false,
+}: Props & { startWithNewQuestion?: boolean }) {
+  const router = useRouter();
+  const host = { publicSlug, hostSecret };
+  const deck = useQuery(api.presentation.getDeck, host);
+  const save = useMutation(api.polls.save);
+  const prepareImages = usePollImages();
+  const start = useMutation(api.polls.start);
+  const close = useMutation(api.presentation.closeVoting);
   const setSlide = useMutation(api.presentation.setSlide);
-  const openVoting = useMutation(api.presentation.openVoting);
-  const closeVoting = useMutation(api.presentation.closeVoting);
-  const generateUploadUrl = useMutation(api.images.generateUploadUrl);
-  const setQuestionImage = useMutation(api.images.setQuestionImage);
-  const setChoiceImage = useMutation(api.images.setChoiceImage);
-
-  // Only the host's *explicit* click is stored; the effective selection is
-  // derived below (falls back to the first question, or clears itself once
-  // the explicit pick is archived/removed) instead of syncing that
-  // fallback through a separate effect.
-  const [explicitSelectedQuestionId, setExplicitSelectedQuestionId] =
-    useState<Id<"questions">>();
-  const [message, setMessage] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  // Keyed the same way as `busy` ("question-image" or
-  // `choice-image-${choiceId}`), so it's unambiguous which upload a
-  // percentage belongs to even though only one upload runs at a time.
-  const [uploadProgress, setUploadProgress] =
-    useState<UploadProgressState>(null);
-
-  const selectedQuestionId =
-    deck !== undefined &&
-    explicitSelectedQuestionId !== undefined &&
-    deck.questions.some(
-      (question) => question._id === explicitSelectedQuestionId,
-    )
-      ? explicitSelectedQuestionId
-      : deck?.questions[0]?._id;
-
-  const detail = useQuery(
-    api.questions.getHostDetail,
-    selectedQuestionId === undefined
-      ? "skip"
-      : { publicSlug, hostSecret, questionId: selectedQuestionId },
+  const resetEvent = useMutation(api.events.reset);
+  const resetQuestion = useMutation(api.questions.resetResponses);
+  const removeQuestion = useMutation(api.questions.removeOrArchive);
+  const reorder = useMutation(api.questions.reorder);
+  const updateDetails = useMutation(api.events.updateDetails);
+  const [selectedId, setSelectedId] = useState<Id<"questions">>();
+  const [editor, setEditor] = useState<
+    Id<"questions"> | "new" | null | undefined
+  >(startWithNewQuestion ? "new" : undefined);
+  const [revision, setRevision] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [previousView, setPreviousView] = useState<QuestionView>();
+  const [error, setError] = useState<string | null>(null);
+  const hostBase = `/host/${publicSlug}/${hostSecret}`;
+  useEffect(() => {
+    if (startWithNewQuestion) router.replace(hostBase, { scroll: false });
+  }, [startWithNewQuestion, hostBase, router]);
+  const requestedQuestion =
+    deck?.questions.find((question) => question._id === selectedId) ??
+    deck?.questions.find(
+      (question) =>
+        deck.event.currentSlide.kind === "question" &&
+        question._id === deck.event.currentSlide.questionId,
+    ) ??
+    deck?.questions[0];
+  const requestedResults = useQuery(
+    api.presentation.getQuestionResults,
+    requestedQuestion ? { ...host, questionId: requestedQuestion._id } : "skip",
   );
+  const requestedEditor =
+    editor === undefined
+      ? requestedQuestion &&
+        deck &&
+        votingState(deck.event, requestedQuestion) === "ready"
+        ? requestedQuestion._id
+        : deck?.questions.length === 0
+          ? "new"
+          : null
+      : editor;
+  const requestedDetail = useQuery(
+    api.questions.getHostDetail,
+    requestedEditor && requestedEditor !== "new"
+      ? { ...host, questionId: requestedEditor }
+      : "skip",
+  );
+  const loadingQuestion =
+    requestedEditor === "new"
+      ? false
+      : requestedEditor
+        ? requestedDetail === undefined
+        : !!requestedQuestion && requestedResults === undefined;
+  // Keep the complete current panel mounted until the next query is ready.
+  const view: QuestionView =
+    loadingQuestion && previousView
+      ? previousView
+      : {
+          selected: requestedQuestion,
+          activeEditor: requestedEditor,
+          revision,
+          detail: requestedDetail,
+          results: requestedResults,
+        };
+  const {
+    selected,
+    activeEditor,
+    detail,
+    results,
+    revision: formRevision,
+  } = view;
+  const busy = saving || loadingQuestion;
 
-  // Remembers a directly-opened host link locally — a genuine side effect
-  // (writing to localStorage), not state derived from a query, so it
-  // belongs in an effect rather than during render.
-  const eventPublicSlug = deck?.event.publicSlug;
   const eventTitle = deck?.event.title;
   useEffect(() => {
-    if (eventPublicSlug === undefined || eventTitle === undefined) return;
-    const hostUrl = `/host/${publicSlug}/${hostSecret}`;
-    rememberEvent({
-      publicSlug: eventPublicSlug,
-      hostUrl,
-      title: eventTitle,
-    });
-  }, [eventPublicSlug, eventTitle, hostSecret, publicSlug]);
+    if (eventTitle !== undefined)
+      rememberEvent({ publicSlug, hostUrl: hostBase, title: eventTitle });
+  }, [publicSlug, hostBase, eventTitle]);
 
-  const activeQuestion = useMemo(() => {
-    const currentSlide = deck?.event.currentSlide;
-    if (deck === undefined || currentSlide?.kind !== "question")
-      return undefined;
-    return deck.questions.find(
-      (question) => question._id === currentSlide.questionId,
-    );
-  }, [deck]);
-
-  const hostBase = `/host/${publicSlug}/${hostSecret}`;
-
-  async function run(label: string, action: () => Promise<unknown>) {
-    setBusy(label);
-    setMessage(null);
+  async function run(action: () => Promise<unknown>) {
+    setSaving(true);
+    setError(null);
     try {
       await action();
-    } catch (error) {
-      setMessage(errorMessage(error));
+    } catch (caught) {
+      setError(errorMessage(caught));
     } finally {
-      setBusy(null);
-      setUploadProgress(null);
+      setSaving(false);
     }
   }
 
-  if (deck === undefined) {
+  async function savePoll(
+    draft: PollDraft,
+    shouldStart: boolean,
+    questionId?: Id<"questions">,
+    expectedChoiceIds: Id<"choices">[] = [],
+    nextEditor?: "new" | Id<"questions">,
+  ) {
+    await run(async () => {
+      const fields = await prepareImages(draft, host);
+      const result = await save({
+        ...host,
+        ...fields,
+        start: shouldStart,
+        questionId,
+        expectedChoiceIds,
+      });
+      setPreviousView(view);
+      setSelectedId(
+        nextEditor && nextEditor !== "new" ? nextEditor : result.questionId,
+      );
+      setEditor(
+        nextEditor ??
+          (shouldStart ||
+          (deck && selected && votingState(deck.event, selected) === "open")
+            ? null
+            : result.questionId),
+      );
+      setRevision((value) => value + 1);
+    });
+  }
+
+  if (!deck)
     return (
       <PageContainer>
-        <div className="space-y-6" aria-busy="true">
-          <div className="h-24 animate-pulse rounded-lg bg-muted" />
-          <div className="h-20 animate-pulse rounded-lg bg-muted" />
-          <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
-            <div className="h-80 animate-pulse rounded-lg bg-muted" />
-            <div className="h-[520px] animate-pulse rounded-lg bg-muted" />
-          </div>
-        </div>
+        <p className="text-sm text-muted-foreground">Loading your poll…</p>
       </PageContainer>
     );
-  }
+  const state = selected ? votingState(deck.event, selected) : "ready";
+  const liveQuestion = deck.questions.find(
+    (question) => question._id === deck.event.openQuestionId,
+  );
 
-  const slides: Slide[] = [
-    { kind: "welcome" },
-    ...deck.questions.map((question) => ({
-      kind: "question" as const,
-      questionId: question._id,
-    })),
-    { kind: "finale" },
-  ];
-  const liveSlide = deck.event.currentSlide;
-  const currentSlideIndex = slides.findIndex((slide) => {
-    if (slide.kind !== liveSlide.kind) return false;
-    if (slide.kind !== "question" || liveSlide.kind !== "question") return true;
-    return slide.questionId === liveSlide.questionId;
-  });
-  const currentSlideLabel =
-    deck.event.currentSlide.kind === "welcome"
-      ? "Welcome"
-      : deck.event.currentSlide.kind === "finale"
-        ? "Finale"
-        : activeQuestion === undefined
-          ? "Question"
-          : `Question ${activeQuestion.position + 1} of ${deck.questions.length}`;
-
-  async function changeSlide(slide: Slide) {
-    await run("slide", () => setSlide({ publicSlug, hostSecret, slide }));
-  }
-
-  async function saveEventDetails(title: string, description: string) {
-    await run("details", () =>
-      updateDetails({
-        publicSlug,
-        hostSecret,
-        title,
-        description: description.trim() === "" ? null : description,
-      }),
-    );
-  }
-
-  async function addQuestion() {
-    await run("add-question", async () => {
-      const result = await createQuestion({
-        publicSlug,
-        hostSecret,
-        prompt: "",
-        minSelections: 1,
-        maxSelections: 1,
-      });
-      setExplicitSelectedQuestionId(result.questionId);
-    });
-  }
-
-  async function saveQuestion(
-    questionId: Id<"questions">,
-    draft: QuestionDraft,
-  ) {
-    const minSelections = Number(draft.minSelections);
-    const maxSelections = Number(draft.maxSelections);
-    const countdownSeconds = draft.countdownSeconds.trim();
-    await run("save-question", () =>
-      updateQuestion({
-        publicSlug,
-        hostSecret,
-        questionId,
-        prompt: draft.prompt,
-        minSelections,
-        maxSelections,
-        countdownSeconds:
-          countdownSeconds === "" ? null : Number(countdownSeconds),
-      }),
-    );
-  }
-
-  async function shiftQuestion(questionId: Id<"questions">, direction: -1 | 1) {
-    if (deck === undefined) return;
-    const index = deck.questions.findIndex(
-      (question) => question._id === questionId,
-    );
-    const target = index + direction;
-    if (index < 0 || target < 0 || target >= deck.questions.length) return;
+  async function moveQuestion(index: number, direction: -1 | 1) {
+    if (!deck) return;
     const ids = deck.questions.map((question) => question._id);
-    [ids[index], ids[target]] = [ids[target], ids[index]];
-    await run("reorder-questions", () =>
-      reorderQuestions({ publicSlug, hostSecret, orderedQuestionIds: ids }),
-    );
-  }
-
-  async function archiveQuestion(questionId: Id<"questions">) {
-    if (
-      !window.confirm(
-        "Remove this question? Questions with recorded responses are archived instead.",
-      )
-    )
-      return;
-    await run("archive-question", () =>
-      removeQuestion({ publicSlug, hostSecret, questionId }),
-    );
-  }
-
-  async function resetQuestion(questionId: Id<"questions">) {
-    if (
-      !window.confirm("Reset this question's responses? This cannot be undone.")
-    )
-      return;
-    await run("reset-question", () =>
-      resetResponses({ publicSlug, hostSecret, questionId }),
-    );
-  }
-
-  async function addChoice(questionId: Id<"questions">) {
-    await run("add-choice", () =>
-      createChoice({ publicSlug, hostSecret, questionId, label: "" }),
-    );
-  }
-
-  async function saveChoice(choiceId: Id<"choices">, label: string) {
-    await run(`save-choice-${choiceId}`, () =>
-      updateChoice({ publicSlug, hostSecret, choiceId, label }),
-    );
-  }
-
-  async function archiveChoice(choiceId: Id<"choices">) {
-    if (
-      !window.confirm(
-        "Remove this choice? Choices with recorded selections are archived instead.",
-      )
-    )
-      return;
-    await run(`archive-choice-${choiceId}`, () =>
-      removeChoice({ publicSlug, hostSecret, choiceId }),
-    );
-  }
-
-  async function reorderChoicesFor(
-    questionId: Id<"questions">,
-    orderedChoiceIds: Id<"choices">[],
-  ) {
-    await run("reorder-choices", () =>
-      reorderChoices({ publicSlug, hostSecret, questionId, orderedChoiceIds }),
-    );
-  }
-
-  /** POSTs the file to a freshly generated upload URL and returns the
-   * storage id Convex assigned it — the only way to attach an image, since
-   * `setQuestionImage`/`setChoiceImage` take a storage id, never raw bytes. */
-  async function uploadImage(
-    file: File,
-    onProgress: (percent: number) => void,
-  ): Promise<Id<"_storage">> {
-    const { uploadUrl } = await generateUploadUrl({ publicSlug, hostSecret });
-    const body = await uploadFileWithProgress(uploadUrl, file, onProgress);
-    return body.storageId;
-  }
-
-  async function uploadQuestionImage(questionId: Id<"questions">, file: File) {
-    const validationError = validateImageFile(file);
-    if (validationError !== null) {
-      setMessage(validationError);
-      return;
-    }
-    await run("question-image", async () => {
-      const storageId = await uploadImage(file, (percent) =>
-        setUploadProgress({ key: "question-image", percent }),
-      );
-      await setQuestionImage({ publicSlug, hostSecret, questionId, storageId });
-    });
-  }
-
-  async function removeQuestionImage(questionId: Id<"questions">) {
-    await run("question-image", () =>
-      setQuestionImage({ publicSlug, hostSecret, questionId, storageId: null }),
-    );
-  }
-
-  async function uploadChoiceImage(choiceId: Id<"choices">, file: File) {
-    const validationError = validateImageFile(file);
-    if (validationError !== null) {
-      setMessage(validationError);
-      return;
-    }
-    await run(`choice-image-${choiceId}`, async () => {
-      const key = `choice-image-${choiceId}`;
-      const storageId = await uploadImage(file, (percent) =>
-        setUploadProgress({ key, percent }),
-      );
-      await setChoiceImage({ publicSlug, hostSecret, choiceId, storageId });
-    });
-  }
-
-  async function removeChoiceImage(choiceId: Id<"choices">) {
-    await run(`choice-image-${choiceId}`, () =>
-      setChoiceImage({ publicSlug, hostSecret, choiceId, storageId: null }),
-    );
+    [ids[index], ids[index + direction]] = [ids[index + direction], ids[index]];
+    await run(() => reorder({ ...host, orderedQuestionIds: ids }));
   }
 
   return (
-    <PageContainer>
-      <header className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-        <div className="min-w-0">
-          <div className="mb-2 flex items-center gap-2">
-            <Button variant="ghost" size="icon" asChild aria-label="Dashboard">
-              <Link href="/">
-                <Home className="h-4 w-4" />
-              </Link>
-            </Button>
-            <h1 className="truncate text-2xl font-semibold tracking-tight">
-              {deck.event.title}
-            </h1>
-          </div>
-          <p className="ml-10 max-w-2xl text-sm text-muted-foreground">
-            {deck.event.description || "No event description yet."}
-          </p>
-          <div className="ml-10 mt-2 flex flex-wrap items-center gap-2">
-            <SecretPill secret={hostSecret} />
-            <span className="font-mono text-xs text-muted-foreground">
-              /e/{deck.event.publicSlug}
-            </span>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {presence === undefined ? (
-            <span className="inline-flex items-center gap-2 rounded-full border bg-muted px-3 py-1 text-sm text-muted-foreground">
-              Connecting…
-            </span>
-          ) : (
-            <span title="Approximate - counts devices with an active audience or projector connection">
-              <PresencePill count={presence.connectedCount} />
-            </span>
-          )}
-          <Button variant="secondary" asChild>
-            <a href={`${hostBase}/present`} target="_blank" rel="noreferrer">
-              <MonitorPlay className="h-4 w-4" /> Open projector
-            </a>
-          </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            disabled={busy !== null}
-            onClick={() => {
-              if (
-                window.confirm(
-                  "Reset all event responses and return to the welcome slide? This cannot be undone.",
-                )
-              ) {
-                void run("reset-event", () =>
-                  resetEvent({ publicSlug, hostSecret }),
-                );
-              }
-            }}
+    <PageContainer className="max-w-5xl">
+      <header className="mb-7 flex flex-wrap items-center justify-between gap-4">
+        <div className="min-w-0 space-y-2">
+          <Link
+            href="/"
+            className="text-sm text-muted-foreground hover:text-foreground"
           >
-            <RotateCcw className="h-4 w-4" /> Reset event
-          </Button>
+            ← Your polls
+          </Link>
+          <h1 className="break-words text-xl font-semibold">
+            {deck.questions.length > 1 ? deck.event.title : "Your poll"}
+          </h1>
         </div>
+        <Button variant="outline" asChild>
+          <a href={`${hostBase}/present`} target="_blank" rel="noreferrer">
+            <MonitorPlay /> Present
+          </a>
+        </Button>
       </header>
-
-      {message && (
+      {error && (
         <p
-          className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
           role="alert"
+          className="mb-5 rounded-lg border border-destructive/30 p-3 text-sm text-destructive"
         >
-          {message}
+          {error}
         </p>
       )}
-
-      <Card className="mb-6">
-        <CardContent className="flex flex-col gap-4 p-4 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={busy !== null || currentSlideIndex <= 0}
-              onClick={() => void changeSlide(slides[currentSlideIndex - 1])}
+      {liveQuestion && (activeEditor || selected?._id !== liveQuestion._id) && (
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
+          <p className="text-sm">Live now: {liveQuestion.prompt}</p>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy}
+            onClick={() => void run(() => close(host))}
+          >
+            End voting
+          </Button>
+        </div>
+      )}
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+        <div className="min-w-0 flex-1 space-y-5">
+          {deck.questions.length > 0 && (
+            <nav
+              aria-label="Questions"
+              className="rounded-xl border-2 border-border bg-muted/50 p-3"
             >
-              <ChevronLeft className="h-4 w-4" /> Previous
-            </Button>
-            <Button
-              variant={
-                deck.event.currentSlide.kind === "welcome"
-                  ? "secondary"
-                  : "outline"
-              }
-              size="sm"
-              disabled={busy !== null}
-              onClick={() => void changeSlide({ kind: "welcome" })}
-            >
-              Welcome
-            </Button>
-            <div className="min-w-36 px-2 text-sm">
-              <p className="text-xs text-muted-foreground">Current slide</p>
-              <p className="font-medium">{currentSlideLabel}</p>
-            </div>
-            <Button
-              variant={
-                deck.event.currentSlide.kind === "finale"
-                  ? "secondary"
-                  : "outline"
-              }
-              size="sm"
-              disabled={busy !== null}
-              onClick={() => void changeSlide({ kind: "finale" })}
-            >
-              <FlagTriangleRight className="h-4 w-4" /> Finale
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={busy !== null || currentSlideIndex >= slides.length - 1}
-              onClick={() => void changeSlide(slides[currentSlideIndex + 1])}
-            >
-              Next <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            {activeQuestion ? (
-              <VotingStatusBadge
-                state={votingState(deck.event, activeQuestion)}
-              />
-            ) : (
-              <Badge variant="outline">No question selected</Badge>
-            )}
-            {activeQuestion &&
-              deck.event.openQuestionId === activeQuestion._id &&
-              activeQuestion.countdownSeconds !== undefined &&
-              deck.event.votingOpenedAt !== undefined && (
-                <Countdown
-                  countdownSeconds={activeQuestion.countdownSeconds}
-                  openedAt={deck.event.votingOpenedAt}
+              <p className="mb-3 text-sm font-semibold">Questions</p>
+              <div
+                role="tablist"
+                aria-label="Questions"
+                className="flex flex-wrap gap-2"
+                onKeyDown={(event) => {
+                  const tabs = Array.from(
+                    event.currentTarget.querySelectorAll<HTMLButtonElement>(
+                      '[role="tab"]:not(:disabled)',
+                    ),
+                  );
+                  const index = tabs.indexOf(
+                    document.activeElement as HTMLButtonElement,
+                  );
+                  let next = index;
+                  if (event.key === "ArrowRight")
+                    next = (index + 1) % tabs.length;
+                  else if (event.key === "ArrowLeft")
+                    next = (index - 1 + tabs.length) % tabs.length;
+                  else if (event.key === "Home") next = 0;
+                  else if (event.key === "End") next = tabs.length - 1;
+                  else return;
+                  event.preventDefault();
+                  tabs[next]?.focus();
+                }}
+              >
+                {deck.questions.map((question, index) => {
+                  const isSelected =
+                    (activeEditor ?? selected?._id) === question._id;
+                  return (
+                    <Button
+                      key={question._id}
+                      id={`question-tab-${question._id}`}
+                      role="tab"
+                      aria-selected={isSelected}
+                      aria-controls="question-panel"
+                      tabIndex={isSelected ? 0 : -1}
+                      type={activeEditor ? "submit" : "button"}
+                      form={activeEditor ? "poll-question-editor" : undefined}
+                      value={`question:${question._id}`}
+                      variant={isSelected ? "default" : "outline"}
+                      className={`h-auto min-h-12 max-w-full justify-start gap-3 rounded-lg border-2 px-3 py-2 text-left ${isSelected ? "border-primary shadow-md" : "border-border bg-background hover:border-primary/50"}`}
+                      disabled={busy}
+                      onClick={(event) => {
+                        if (isSelected) {
+                          event.preventDefault();
+                          return;
+                        }
+                        if (!activeEditor) {
+                          setPreviousView(view);
+                          setSelectedId(question._id);
+                          setEditor(null);
+                          setError(null);
+                        }
+                      }}
+                    >
+                      <span
+                        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs font-bold ${isSelected ? "bg-primary-foreground/20" : "bg-muted"}`}
+                      >
+                        {index + 1}
+                      </span>
+                      <span className="max-w-52 truncate">
+                        {question.prompt || "Untitled question"}
+                      </span>
+                      {deck.event.openQuestionId === question._id && (
+                        <span className="text-xs">Live</span>
+                      )}
+                    </Button>
+                  );
+                })}
+                {activeEditor === "new" && (
+                  <Button
+                    id="question-tab-new"
+                    role="tab"
+                    aria-selected
+                    aria-controls="question-panel"
+                    type="button"
+                    className="h-auto min-h-12 gap-3 rounded-lg border-2 border-primary px-3 py-2 shadow-md"
+                    disabled={busy}
+                  >
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-foreground/20 text-xs font-bold">
+                      {deck.questions.length + 1}
+                    </span>
+                    New question
+                  </Button>
+                )}
+              </div>
+            </nav>
+          )}
+          <Card
+            id="question-panel"
+            aria-busy={busy}
+            role={deck.questions.length ? "tabpanel" : undefined}
+            aria-labelledby={
+              deck.questions.length
+                ? `question-tab-${activeEditor ?? selected?._id}`
+                : undefined
+            }
+          >
+            <CardContent className="p-5 sm:p-7">
+              {activeEditor === "new" ? (
+                <PollEditor
+                  key={`new-${formRevision}`}
+                  busy={busy}
+                  onSave={(draft, shouldStart) => savePoll(draft, shouldStart)}
+                  onAddQuestion={(draft) =>
+                    savePoll(draft, false, undefined, [], "new")
+                  }
+                  onSelectQuestion={(draft, target) =>
+                    savePoll(draft, false, undefined, [], target)
+                  }
+                  canAddQuestion={deck.questions.length < 99}
+                  onCancel={
+                    deck.questions.length
+                      ? () => {
+                          setPreviousView(view);
+                          setEditor(null);
+                        }
+                      : undefined
+                  }
                 />
+              ) : activeEditor && detail ? (
+                <ExistingQuestionForm
+                  key={`${activeEditor}-${formRevision}`}
+                  {...host}
+                  detail={detail}
+                  questionId={activeEditor}
+                  busy={busy}
+                  live={deck.event.openQuestionId === activeEditor}
+                  closed={deck.questions.some(
+                    (question) =>
+                      question._id === activeEditor &&
+                      votingState(deck.event, question) === "closed",
+                  )}
+                  onSave={savePoll}
+                  canAddQuestion={deck.questions.length < 100}
+                  onCancel={() => {
+                    setPreviousView(view);
+                    setEditor(null);
+                    setError(null);
+                  }}
+                />
+              ) : activeEditor ? (
+                <p className="text-sm text-muted-foreground">Loading editor…</p>
+              ) : selected ? (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between gap-3">
+                    <VotingStatusBadge state={state} />
+                    {state === "open" &&
+                      selected.countdownSeconds !== undefined &&
+                      deck.event.votingOpenedAt !== undefined && (
+                        <Countdown
+                          countdownSeconds={selected.countdownSeconds}
+                          openedAt={deck.event.votingOpenedAt}
+                        />
+                      )}
+                  </div>
+                  <h2 className="break-words text-2xl font-semibold">
+                    {selected.prompt || "Untitled question"}
+                  </h2>
+                  {results?.imageUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element -- Convex storage URLs are deployment-specific.
+                    <img
+                      src={results.imageUrl}
+                      alt="Question illustration"
+                      className="max-h-72 rounded-lg object-contain"
+                    />
+                  )}
+                  {results ? (
+                    <div className="space-y-4" aria-live="polite">
+                      {results.choices.map((choice) => (
+                        <ResultsBar
+                          key={choice.choiceId}
+                          choice={choice}
+                          isWinner={state === "closed" && choice.winner}
+                        />
+                      ))}
+                      <p className="text-sm text-muted-foreground">
+                        {results.ballotCount} vote
+                        {results.ballotCount === 1 ? "" : "s"}
+                        {state === "ready" && " · Ready when you are"}
+                      </p>
+                      {selected.maxSelections > 1 && (
+                        <p className="text-xs text-muted-foreground">
+                          People can choose multiple answers, so percentages may
+                          total more than 100%.
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      Loading results…
+                    </p>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {state === "open" ? (
+                      <Button
+                        disabled={busy}
+                        onClick={() => void run(() => close(host))}
+                      >
+                        <Square /> End voting
+                      </Button>
+                    ) : (
+                      <Button
+                        disabled={busy}
+                        onClick={() =>
+                          void run(() =>
+                            start({ ...host, questionId: selected._id }),
+                          )
+                        }
+                      >
+                        {state === "closed" ? "Reopen poll" : "Start poll"}
+                      </Button>
+                    )}
+                    <Button
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => {
+                        setPreviousView(view);
+                        setEditor(selected._id);
+                      }}
+                    >
+                      Edit
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <Button onClick={() => setEditor("new")}>
+                  <Plus /> Add a question
+                </Button>
               )}
-            {activeQuestion &&
-            deck.event.openQuestionId === activeQuestion._id ? (
-              <Button
-                variant="destructive"
-                disabled={busy !== null}
-                onClick={() =>
-                  void run("close-voting", () =>
-                    closeVoting({ publicSlug, hostSecret }),
-                  )
-                }
-              >
-                <Square className="h-4 w-4" /> Close voting
-              </Button>
-            ) : activeQuestion ? (
-              <Button
-                disabled={busy !== null}
-                onClick={() =>
-                  void run("open-voting", () =>
-                    openVoting({
-                      publicSlug,
-                      hostSecret,
-                      questionId: activeQuestion._id,
-                    }),
-                  )
-                }
-              >
-                Open voting
-              </Button>
-            ) : null}
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
-        <Card className="h-fit">
-          <CardHeader className="flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-base">Sequence</CardTitle>
+            </CardContent>
+          </Card>
+          {!activeEditor && (
             <Button
               variant="ghost"
-              size="icon"
-              aria-label="Add question"
-              disabled={busy !== null}
-              onClick={() => void addQuestion()}
+              disabled={busy || deck.questions.length >= 100}
+              onClick={() => {
+                setEditor("new");
+                setError(null);
+              }}
             >
-              <Plus className="h-4 w-4" />
+              <Plus /> Add another question
             </Button>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-1.5 p-3 pt-0">
-            {deck.questions.length === 0 ? (
-              <p className="px-2 py-5 text-center text-sm text-muted-foreground">
-                Add your first question to begin.
-              </p>
-            ) : (
-              deck.questions.map((question, index) => (
-                <div
-                  key={question._id}
-                  className={cn(
-                    "flex items-center gap-1 rounded-md border p-1",
-                    selectedQuestionId === question._id &&
-                      "border-primary bg-primary/5",
-                  )}
-                >
-                  <button
-                    type="button"
-                    className="min-w-0 flex-1 rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
-                    onClick={() => setExplicitSelectedQuestionId(question._id)}
-                  >
-                    <span className="mr-1.5 text-muted-foreground">
-                      {question.position + 1}.
-                    </span>
-                    {displayQuestion(question)}
-                  </button>
-                  <VotingStatusBadge
-                    state={votingState(deck.event, question)}
-                  />
+          )}
+        </div>
+        <SharePoll publicSlug={publicSlug} />
+      </div>
+      <details className="mt-8 rounded-lg border p-4">
+        <summary className="cursor-pointer text-sm text-muted-foreground">
+          Manage poll
+        </summary>
+        <div className="mt-5 space-y-6">
+          <div className="space-y-2">
+            <CopyLinkButton path={hostBase}>
+              Copy private host link
+            </CopyLinkButton>
+            <p className="text-xs text-muted-foreground">
+              Keep this link to edit your poll on another device. Anyone with it
+              can manage the poll.
+            </p>
+          </div>
+          <details>
+            <summary className="cursor-pointer text-sm">Event details</summary>
+            <EventDetails
+              title={deck.event.title}
+              description={deck.event.description ?? ""}
+              busy={busy}
+              onSave={(title, description) =>
+                run(() =>
+                  updateDetails({
+                    ...host,
+                    title,
+                    description: description.trim() || null,
+                  }),
+                )
+              }
+            />
+          </details>
+          {deck.questions.length > 1 && (
+            <details>
+              <summary className="cursor-pointer text-sm">
+                Presentation and question order
+              </summary>
+              <div className="mt-4 space-y-3">
+                <div className="flex flex-wrap gap-2">
                   <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    aria-label={`Move question ${question.position + 1} up`}
-                    disabled={busy !== null || index === 0}
-                    onClick={() => void shiftQuestion(question._id, -1)}
-                  >
-                    <ChevronUp className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    aria-label={`Move question ${question.position + 1} down`}
-                    disabled={
-                      busy !== null || index === deck.questions.length - 1
-                    }
-                    onClick={() => void shiftQuestion(question._id, 1)}
-                  >
-                    <ChevronDown className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    aria-label={`Show question ${question.position + 1}`}
-                    disabled={busy !== null}
+                    variant="outline"
+                    disabled={busy}
                     onClick={() =>
-                      void changeSlide({
-                        kind: "question",
-                        questionId: question._id,
+                      void run(async () => {
+                        if (deck.event.openQuestionId) await close(host);
+                        await setSlide({ ...host, slide: { kind: "welcome" } });
                       })
                     }
                   >
-                    <MonitorPlay className="h-3.5 w-3.5" />
+                    Show welcome
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() =>
+                      void run(async () => {
+                        if (deck.event.openQuestionId) await close(host);
+                        await setSlide({ ...host, slide: { kind: "finale" } });
+                      })
+                    }
+                  >
+                    Finish event
                   </Button>
                 </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
-
-        <div className="space-y-6">
-          <EventDetailsCard
-            key={deck.event._id}
-            title={deck.event.title}
-            description={deck.event.description}
-            disabled={busy !== null}
-            onSave={saveEventDetails}
-          />
-
-          {detail === undefined ? (
-            <Card>
-              <CardContent className="p-8 text-center text-sm text-muted-foreground">
-                {deck.questions.length === 0
-                  ? "Create a question to open its editor."
-                  : "Loading question editor…"}
-              </CardContent>
-            </Card>
-          ) : (
-            <QuestionEditorCard
-              key={detail.question._id}
-              detail={detail}
-              hostBase={hostBase}
-              busy={busy}
-              uploadProgress={uploadProgress}
-              liveBallotCount={
-                deck.currentQuestionResults?.questionId === detail.question._id
-                  ? deck.currentQuestionResults.ballotCount
-                  : undefined
-              }
-              onSaveQuestion={(draft) =>
-                saveQuestion(detail.question._id, draft)
-              }
-              onArchiveQuestion={() => archiveQuestion(detail.question._id)}
-              onResetQuestion={() => resetQuestion(detail.question._id)}
-              onAddChoice={() => addChoice(detail.question._id)}
-              onSaveChoice={saveChoice}
-              onArchiveChoice={archiveChoice}
-              onReorderChoices={(orderedChoiceIds) =>
-                reorderChoicesFor(detail.question._id, orderedChoiceIds)
-              }
-              onUploadQuestionImage={(file) =>
-                uploadQuestionImage(detail.question._id, file)
-              }
-              onRemoveQuestionImage={() =>
-                removeQuestionImage(detail.question._id)
-              }
-              onUploadChoiceImage={uploadChoiceImage}
-              onRemoveChoiceImage={removeChoiceImage}
-            />
+                {deck.questions.map((question, index) => (
+                  <div key={question._id} className="flex items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate text-sm">
+                      {question.prompt || `Question ${index + 1}`}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Move question ${index + 1} up`}
+                      disabled={busy || index === 0}
+                      onClick={() => void moveQuestion(index, -1)}
+                    >
+                      <ArrowUp />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Move question ${index + 1} down`}
+                      disabled={busy || index === deck.questions.length - 1}
+                      onClick={() => void moveQuestion(index, 1)}
+                    >
+                      <ArrowDown />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </details>
           )}
+          <div className="flex flex-wrap gap-2">
+            {selected && (
+              <>
+                <Button variant="outline" asChild>
+                  <a
+                    href={`${hostBase}/results/${selected._id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open results separately
+                  </a>
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        "Clear this question's votes? This cannot be undone.",
+                      )
+                    )
+                      void run(() =>
+                        resetQuestion({ ...host, questionId: selected._id }),
+                      );
+                  }}
+                >
+                  Clear question votes
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        "Remove this question? Recorded votes will be kept in its results.",
+                      )
+                    )
+                      void run(async () => {
+                        await removeQuestion({
+                          ...host,
+                          questionId: selected._id,
+                        });
+                        setSelectedId(undefined);
+                        setEditor(undefined);
+                      });
+                  }}
+                >
+                  Remove question
+                </Button>
+              </>
+            )}
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    "Clear all votes and restart this event? This cannot be undone.",
+                  )
+                )
+                  void run(async () => {
+                    await resetEvent(host);
+                    setEditor(undefined);
+                  });
+              }}
+            >
+              Reset event
+            </Button>
+          </div>
         </div>
-      </div>
+      </details>
     </PageContainer>
   );
 }
 
-/**
- * The event title/description editor. Keyed by the event id in the parent,
- * so its draft state is seeded once from the current `title`/`description`
- * and only ever reset by a full remount (a different event) — never by an
- * effect racing the host's typing against the next reactive query push.
- */
-function EventDetailsCard({
+type QuestionFormProps = Props & {
+  questionId: Id<"questions">;
+  busy: boolean;
+  live: boolean;
+  closed: boolean;
+  canAddQuestion: boolean;
+  onSave: (
+    draft: PollDraft,
+    start: boolean,
+    questionId: Id<"questions">,
+    expectedChoiceIds: Id<"choices">[],
+    nextEditor?: "new" | Id<"questions">,
+  ) => Promise<void>;
+  onCancel: () => void;
+};
+function ExistingQuestionForm({
+  detail,
+  ...props
+}: QuestionFormProps & { detail: QuestionDetail }) {
+  const [original] = useState(detail);
+  const active = original.choices.filter((choice) => !choice.archived);
+  const expectedChoiceIds = active.map((choice) => choice._id);
+  return (
+    <PollEditor
+      initial={{
+        prompt: original.question.prompt,
+        imageUrl: original.question.imageUrl,
+        choices: active.map((choice) => ({
+          id: choice._id,
+          label: choice.label,
+          imageUrl: choice.imageUrl,
+        })),
+        minSelections: original.question.minSelections,
+        maxSelections: original.question.maxSelections,
+        countdownSeconds: original.question.countdownSeconds,
+      }}
+      busy={props.busy}
+      live={props.live}
+      closed={props.closed}
+      onSave={(draft, start) =>
+        props.onSave(draft, start, props.questionId, expectedChoiceIds)
+      }
+      onCancel={props.onCancel}
+      onAddQuestion={(draft) =>
+        props.onSave(draft, false, props.questionId, expectedChoiceIds, "new")
+      }
+      onSelectQuestion={(draft, target) =>
+        props.onSave(draft, false, props.questionId, expectedChoiceIds, target)
+      }
+      canAddQuestion={props.canAddQuestion}
+    />
+  );
+}
+
+function EventDetails({
   title,
   description,
-  disabled,
+  busy,
   onSave,
 }: {
   title: string;
-  description: string | undefined;
-  disabled: boolean;
-  onSave: (title: string, description: string) => void;
+  description: string;
+  busy: boolean;
+  onSave: (title: string, description: string) => Promise<void>;
 }) {
   const [titleDraft, setTitleDraft] = useState(title);
-  const [descriptionDraft, setDescriptionDraft] = useState(description ?? "");
-
+  const [descriptionDraft, setDescriptionDraft] = useState(description);
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Event details</CardTitle>
-        <CardDescription>
-          Changes are published only when you save them.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="space-y-1.5">
-          <Label htmlFor="event-title">Title</Label>
-          <Input
-            id="event-title"
-            value={titleDraft}
-            onChange={(event) => setTitleDraft(event.target.value)}
-            disabled={disabled}
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="event-description">Description</Label>
-          <Textarea
-            id="event-description"
-            value={descriptionDraft}
-            onChange={(event) => setDescriptionDraft(event.target.value)}
-            disabled={disabled}
-            placeholder="Optional context for your audience"
-          />
-        </div>
-        <Button
-          size="sm"
-          disabled={disabled}
-          onClick={() => onSave(titleDraft, descriptionDraft)}
-        >
-          <Save className="h-3.5 w-3.5" /> Save event details
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
-
-/**
- * The focused question/choices editor. Keyed by the question id in the
- * parent, so switching questions fully remounts this component (fresh
- * drafts seeded from the new `detail`) instead of syncing that reset
- * through an effect. Within the *same* question, an added/removed/archived
- * choice still needs to reconcile the choice-label drafts without
- * clobbering an in-progress edit to an untouched choice; that reconciling
- * `setState` call runs directly in the render body (React's documented
- * "adjusting state when a prop changes" pattern), not inside an effect.
- */
-function QuestionEditorCard({
-  detail,
-  hostBase,
-  busy,
-  uploadProgress,
-  liveBallotCount,
-  onSaveQuestion,
-  onArchiveQuestion,
-  onResetQuestion,
-  onAddChoice,
-  onSaveChoice,
-  onArchiveChoice,
-  onReorderChoices,
-  onUploadQuestionImage,
-  onRemoveQuestionImage,
-  onUploadChoiceImage,
-  onRemoveChoiceImage,
-}: {
-  detail: QuestionDetail;
-  hostBase: string;
-  busy: string | null;
-  uploadProgress: UploadProgressState;
-  liveBallotCount: number | undefined;
-  onSaveQuestion: (draft: QuestionDraft) => void;
-  onArchiveQuestion: () => void;
-  onResetQuestion: () => void;
-  onAddChoice: () => void;
-  onSaveChoice: (choiceId: Id<"choices">, label: string) => void;
-  onArchiveChoice: (choiceId: Id<"choices">) => void;
-  onReorderChoices: (orderedChoiceIds: Id<"choices">[]) => void;
-  onUploadQuestionImage: (file: File) => void;
-  onRemoveQuestionImage: () => void;
-  onUploadChoiceImage: (choiceId: Id<"choices">, file: File) => void;
-  onRemoveChoiceImage: (choiceId: Id<"choices">) => void;
-}) {
-  const { question, choices } = detail;
-
-  const [questionDraft, setQuestionDraft] = useState<QuestionDraft>(() => ({
-    prompt: question.prompt,
-    minSelections: String(question.minSelections),
-    maxSelections: String(question.maxSelections),
-    countdownSeconds:
-      question.countdownSeconds === undefined
-        ? ""
-        : String(question.countdownSeconds),
-  }));
-  const [choiceDrafts, setChoiceDrafts] = useState<ChoiceDraft[]>(() =>
-    choices.map((choice) => ({ id: choice._id, label: choice.label })),
-  );
-  const [reconciledChoiceIds, setReconciledChoiceIds] = useState<
-    Id<"choices">[]
-  >(() => choices.map((choice) => choice._id));
-
-  const currentChoiceIds = choices.map((choice) => choice._id);
-  const choiceIdsChanged =
-    currentChoiceIds.length !== reconciledChoiceIds.length ||
-    currentChoiceIds.some((id, index) => id !== reconciledChoiceIds[index]);
-  if (choiceIdsChanged) {
-    setReconciledChoiceIds(currentChoiceIds);
-    setChoiceDrafts((previous) => {
-      const previousById = new Map(previous.map((draft) => [draft.id, draft]));
-      return choices.map(
-        (choice) =>
-          previousById.get(choice._id) ?? {
-            id: choice._id,
-            label: choice.label,
-          },
-      );
-    });
-  }
-
-  const activeChoices = choices.filter((choice) => !choice.archived);
-  const disabled = busy !== null;
-
-  function shiftChoice(choiceId: Id<"choices">, direction: -1 | 1) {
-    const index = activeChoices.findIndex((choice) => choice._id === choiceId);
-    const target = index + direction;
-    if (index < 0 || target < 0 || target >= activeChoices.length) return;
-    const ids = activeChoices.map((choice) => choice._id);
-    [ids[index], ids[target]] = [ids[target], ids[index]];
-    onReorderChoices(ids);
-  }
-
-  return (
-    <Card>
-      <CardHeader className="flex-row items-start justify-between space-y-0">
-        <div>
-          <CardTitle className="text-base">
-            Question {question.position + 1}
-          </CardTitle>
-          <CardDescription>
-            Editing this question does not change the projected slide.
-          </CardDescription>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" asChild>
-            <a
-              href={`${hostBase}/results/${question._id}`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              <BarChart3 className="h-3.5 w-3.5" /> Stable results
-            </a>
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={disabled}
-            onClick={onResetQuestion}
-          >
-            <RotateCcw className="h-3.5 w-3.5" /> Reset responses
-          </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            disabled={disabled}
-            onClick={onArchiveQuestion}
-          >
-            <Archive className="h-3.5 w-3.5" /> Remove
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-5">
-        <div className="space-y-1.5">
-          <Label htmlFor="prompt">Prompt</Label>
-          <Input
-            id="prompt"
-            value={questionDraft.prompt}
-            onChange={(event) =>
-              setQuestionDraft({ ...questionDraft, prompt: event.target.value })
-            }
-            disabled={disabled}
-          />
-        </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="min">Min selections</Label>
-            <Input
-              id="min"
-              type="number"
-              min={1}
-              value={questionDraft.minSelections}
-              onChange={(event) =>
-                setQuestionDraft({
-                  ...questionDraft,
-                  minSelections: event.target.value,
-                })
-              }
-              disabled={disabled}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="max">Max selections</Label>
-            <Input
-              id="max"
-              type="number"
-              min={1}
-              value={questionDraft.maxSelections}
-              onChange={(event) =>
-                setQuestionDraft({
-                  ...questionDraft,
-                  maxSelections: event.target.value,
-                })
-              }
-              disabled={disabled}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="countdown">Countdown (sec)</Label>
-            <Input
-              id="countdown"
-              type="number"
-              min={5}
-              value={questionDraft.countdownSeconds}
-              onChange={(event) =>
-                setQuestionDraft({
-                  ...questionDraft,
-                  countdownSeconds: event.target.value,
-                })
-              }
-              placeholder="None"
-              disabled={disabled}
-            />
-          </div>
-        </div>
-        <Button
-          size="sm"
-          disabled={disabled}
-          onClick={() => onSaveQuestion(questionDraft)}
-        >
-          <Save className="h-3.5 w-3.5" /> Save question
-        </Button>
-        <div className="space-y-1.5">
-          <Label>Question image</Label>
-          <ImageControl
-            imageUrl={question.imageUrl}
-            label="Question image"
-            uploading={busy === "question-image"}
-            progress={
-              uploadProgress?.key === "question-image"
-                ? uploadProgress.percent
-                : undefined
-            }
-            disabled={disabled}
-            onUpload={onUploadQuestionImage}
-            onRemove={onRemoveQuestionImage}
-          />
-        </div>
-        <Separator />
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <Label>Choices</Label>
-            <span className="text-xs text-muted-foreground">
-              {activeChoices.length} active choices ·{" "}
-              {liveBallotCount !== undefined
-                ? `${liveBallotCount} ballots`
-                : "results shown on stable results page"}
-            </span>
-          </div>
-          <ul className="space-y-2">
-            {choices.map((choice) => {
-              const draft = choiceDrafts.find((item) => item.id === choice._id);
-              const activeIndex = activeChoices.findIndex(
-                (item) => item._id === choice._id,
-              );
-              return (
-                <li
-                  key={choice._id}
-                  className="flex flex-wrap items-center gap-2 rounded-md border p-2.5"
-                >
-                  <ImageControl
-                    imageUrl={choice.imageUrl}
-                    label="Choice image"
-                    uploading={busy === `choice-image-${choice._id}`}
-                    progress={
-                      uploadProgress?.key === `choice-image-${choice._id}`
-                        ? uploadProgress.percent
-                        : undefined
-                    }
-                    disabled={disabled}
-                    onUpload={(file) => onUploadChoiceImage(choice._id, file)}
-                    onRemove={() => onRemoveChoiceImage(choice._id)}
-                    compact
-                  />
-                  <Input
-                    className="h-8 min-w-40 flex-1"
-                    value={draft?.label ?? choice.label}
-                    onChange={(event) =>
-                      setChoiceDrafts(
-                        choiceDrafts.map((item) =>
-                          item.id === choice._id
-                            ? { ...item, label: event.target.value }
-                            : item,
-                        ),
-                      )
-                    }
-                    disabled={disabled}
-                  />
-                  {choice.archived && <Badge variant="outline">Archived</Badge>}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    aria-label="Save choice"
-                    disabled={disabled}
-                    onClick={() =>
-                      onSaveChoice(choice._id, draft?.label ?? choice.label)
-                    }
-                  >
-                    <Save className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    aria-label="Move choice up"
-                    disabled={disabled || choice.archived || activeIndex === 0}
-                    onClick={() => shiftChoice(choice._id, -1)}
-                  >
-                    <ChevronUp className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    aria-label="Move choice down"
-                    disabled={
-                      disabled ||
-                      choice.archived ||
-                      activeIndex === activeChoices.length - 1
-                    }
-                    onClick={() => shiftChoice(choice._id, 1)}
-                  >
-                    <ChevronDown className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    aria-label="Remove or archive choice"
-                    disabled={disabled || choice.archived}
-                    onClick={() => onArchiveChoice(choice._id)}
-                  >
-                    {choice.archived ? (
-                      <Archive className="h-3.5 w-3.5" />
-                    ) : (
-                      <Trash2 className="h-3.5 w-3.5" />
-                    )}
-                  </Button>
-                </li>
-              );
-            })}
-          </ul>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={disabled}
-            onClick={onAddChoice}
-          >
-            <Plus className="h-3.5 w-3.5" /> Add choice
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-/**
- * A question or choice image slot: shows the current thumbnail (or a
- * neutral placeholder icon so choices without an image keep the same
- * layout as ones that have one), and lets the host upload, replace, or
- * remove it. The hidden file input is the only way to trigger a native
- * file picker from a styled button/icon.
- */
-function ImageControl({
-  imageUrl,
-  label,
-  uploading,
-  progress,
-  disabled,
-  onUpload,
-  onRemove,
-  compact = false,
-}: {
-  imageUrl: string | null;
-  label: string;
-  uploading: boolean;
-  /** 0-100 upload percentage while `uploading` is true, when the browser
-   * could compute it (`ProgressEvent.lengthComputable`); `undefined` shows
-   * an indeterminate spinner instead. */
-  progress: number | undefined;
-  disabled: boolean;
-  onUpload: (file: File) => void;
-  onRemove: () => void;
-  compact?: boolean;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    // Reset so choosing the exact same file again still fires onChange.
-    event.target.value = "";
-    if (file !== undefined) onUpload(file);
-  }
-
-  const fileInput = (
-    <input
-      ref={inputRef}
-      type="file"
-      accept="image/*"
-      className="hidden"
-      onChange={handleFileChange}
-    />
-  );
-
-  if (compact) {
-    return (
-      <div className="relative shrink-0">
-        {fileInput}
-        <button
-          type="button"
-          className="flex h-8 w-8 items-center justify-center overflow-hidden rounded bg-muted text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={disabled}
-          title={imageUrl ? "Replace image" : "Upload image"}
-          onClick={() => inputRef.current?.click()}
-        >
-          {uploading ? (
-            progress !== undefined ? (
-              <span className="text-[9px] font-semibold tabular-nums">
-                {progress}%
-              </span>
-            ) : (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            )
-          ) : imageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element -- Convex storage URL: host is per-deployment/dynamic, so next/image can't safely whitelist it via remotePatterns.
-            <img className="h-8 w-8 object-cover" src={imageUrl} alt="" />
-          ) : (
-            <ImageIcon className="h-3.5 w-3.5" />
-          )}
-        </button>
-        {imageUrl && !uploading && (
-          <button
-            type="button"
-            className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-white disabled:opacity-50"
-            aria-label={`Remove ${label.toLowerCase()}`}
-            disabled={disabled}
-            onClick={onRemove}
-          >
-            <X className="h-2.5 w-2.5" />
-          </button>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-wrap items-center gap-3 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-      {fileInput}
-      {imageUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element -- Convex storage URL: host is per-deployment/dynamic, so next/image can't safely whitelist it via remotePatterns.
-        <img className="h-10 w-10 rounded object-cover" src={imageUrl} alt="" />
-      ) : (
-        <ImageIcon className="h-4 w-4" />
-      )}
-      <span>
-        {uploading
-          ? progress !== undefined
-            ? `Uploading\u2026 ${progress}%`
-            : "Uploading\u2026"
-          : imageUrl
-            ? `${label} attached`
-            : "No image attached"}
-      </span>
-      {uploading && progress !== undefined && (
-        <Progress value={progress} className="h-1.5 w-full" />
-      )}
-      <div className="ml-auto flex gap-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-label={
-            imageUrl
-              ? `Replace ${label.toLowerCase()}`
-              : `Upload ${label.toLowerCase()}`
-          }
-          disabled={disabled}
-          onClick={() => inputRef.current?.click()}
-        >
-          {imageUrl ? "Replace" : "Upload"}
-        </Button>
-        {imageUrl && (
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label={`Remove ${label.toLowerCase()}`}
-            disabled={disabled}
-            onClick={onRemove}
-          >
-            Remove
-          </Button>
-        )}
-      </div>
-    </div>
+    <form
+      className="mt-4 max-w-xl space-y-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void onSave(titleDraft, descriptionDraft);
+      }}
+    >
+      <Label htmlFor="event-title">Title</Label>
+      <Input
+        id="event-title"
+        value={titleDraft}
+        required
+        maxLength={200}
+        disabled={busy}
+        onChange={(event) => setTitleDraft(event.target.value)}
+      />
+      <Label htmlFor="event-description">Description</Label>
+      <Textarea
+        id="event-description"
+        value={descriptionDraft}
+        maxLength={2000}
+        disabled={busy}
+        onChange={(event) => setDescriptionDraft(event.target.value)}
+      />
+      <Button type="submit" variant="outline" disabled={busy}>
+        Save details
+      </Button>
+    </form>
   );
 }

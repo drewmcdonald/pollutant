@@ -2,7 +2,9 @@
 
 ## 1. Product model
 
-The app is organized around **events**.
+The default experience starts with **one poll**: enter a question and at least two options, choose **Start poll**, then share its voting link or QR code. No event title or presentation setup is required. **Save draft** keeps a poll private until it is started.
+
+An event remains the underlying container. Its initial title comes from the question. Hosts can add more questions later and optionally use the projector.
 
 Each event contains:
 
@@ -50,8 +52,8 @@ The host can:
 - Edit its title and description
 - Add, edit, archive, and reorder questions
 - Add, edit, archive, and reorder choices
-- Configure selection limits
-- Configure countdown durations
+- Configure selection limits under Options
+- Configure countdown durations under Options
 - Upload, replace, and remove images
 - Preview questions
 - Start the presentation
@@ -62,6 +64,17 @@ The host can:
 - Reset the entire event for reuse
 
 The host is allowed to edit questions and choices after votes have been received. Existing ballots retain references to the choices originally selected, meaning changing a choice’s text or image also changes how those existing votes are presented.
+
+### Host workspace
+
+- One editor saves the question and all active options together; options have no separate save buttons.
+- Start poll also selects the question for presentation and opens voting in the same transaction.
+- Single-answer voting and no timer are the defaults. Multiple-answer limits, countdowns, ordering, and the question image live under Options. Each answer always has an image picker to the left of its text input, including before the first save.
+- The live screen includes results, vote count, the public voting link, QR code, and End voting.
+- Prominent numbered question tabs show the selected question. Switching tabs while editing saves the current text and images before opening the selected editor; a failed save keeps the current draft in place.
+- Add another question is available on the homepage and while editing. It saves the current draft without starting voting, then opens a fresh question editor. Present opens the optional projector.
+- Private host links, event details, presentation controls, and resets live under Manage poll.
+- Editing choices preserves existing IDs and votes. A stale editor cannot silently remove options another host has added.
 
 ### Archival behavior
 
@@ -163,7 +176,8 @@ The audience experience:
 - Confirms successful submission
 - Shows live results for the currently active voting screen
 - Automatically moves to the next voting screen when the host advances
-- Shows a waiting state when there is no open question
+- Keeps final results visible for the current closed question, including to late arrivals
+- Shows a waiting state for an unstarted question or welcome slide
 
 Audience phones do not follow the complete presentation deck:
 

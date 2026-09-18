@@ -37,7 +37,7 @@ Convex is the source of truth for event, question, ballot, presentation, and tim
 
 The dashboard lets a host:
 
-- Create an event
+- Enter a question and options, then start the poll or save a draft
 - Reopen events remembered by the current browser
 - Remove an event from the local list without deleting it
 - Copy audience and host links
@@ -63,26 +63,16 @@ The audience route renders exactly one of these states:
 - Welcome or waiting for the host
 - Open question before submission
 - Open question after submission, including live results
-- Waiting after voting closes
+- Closed question with final results
 - Event finished
 
 Audience clients do not receive the full question sequence, prior question results, host secrets, or host-only metadata.
 
 ### 3.3 Host control room — `/host/[publicSlug]/[hostSecret]`
 
-The control room is the private working surface. It contains:
+The private host workspace shows the selected question, live/final results, vote count, Start poll or End voting, and the public voting link and QR code. Drafts open in the shared question editor. Options are collapsed by default; images become available once a draft exists.
 
-- Event settings
-- Compact sequence list
-- Focused question detail editor
-- Image controls
-- Live audience presence count
-- Current presentation state
-- Voting controls
-- Timer state
-- Previous/next/finale controls
-- Reset controls
-- A button that opens the projector route in a separate window
+Add another question is visible from the homepage and throughout drafting. It saves the current question without starting voting and opens a blank editor only after the save succeeds. The homepage carries this one-time intent to the host route with `?newQuestion=1`, which the host consumes and removes. Present opens the projector separately. Manage poll contains private host-link management, event details, ordering, welcome/finale actions, and resets.
 
 The host secret is a bearer credential. Possession of the URL grants control.
 
@@ -105,17 +95,15 @@ This host-only route displays the final or current results for one question. It 
 
 ## 4. Interaction flows
 
-### 4.1 Create an event
+### 4.1 Create a poll
 
-1. The dashboard requests creation of a new event.
+1. The host enters a question and options on the homepage.
 2. The client generates a strong random host secret.
-3. The create mutation stores only a cryptographic digest of that secret.
-4. Convex generates a separate opaque public slug.
-5. The mutation returns event identifiers and the client assembles the host URL.
-6. The dashboard remembers the host URL locally.
-7. The host enters the sequence editor.
+3. `polls.create` creates the event, question, and choices in one transaction using the existing validated mutations. The event title is derived from the question; only the host secret's digest is stored.
+4. Start poll also selects the question and opens voting in that transaction. Save draft leaves the audience waiting. A validation failure rolls back the whole operation.
+5. The client remembers the private host URL and opens the workspace with sharing and results.
 
-A public slug and host secret must be independently generated. Knowledge of the public slug must not help derive the host secret.
+A public slug and host secret are independently generated. Knowledge of the public slug must not help derive the host secret.
 
 ### 4.2 Author a sequence
 
@@ -124,7 +112,7 @@ The control room uses two coordinated views:
 - A compact list for adding and reordering questions
 - A focused detail panel for editing one question and its choices
 
-Question edits save through explicit mutations. Reordering sends the complete ordered list of affected IDs, and the backend verifies that every ID belongs to the event before assigning contiguous positions.
+`polls.save` saves a question and all active choices atomically, preserving IDs and archival behavior. The editor submits its original active choice IDs so changes to the option set by another host are detected before applying the save. Reordering sends the complete ordered list of affected IDs, and the backend verifies that every ID belongs to the event before assigning contiguous positions.
 
 The same pattern applies to choice ordering within a question.
 
@@ -134,18 +122,16 @@ Removing an unvoted question deletes it. Removing a question with ballots archiv
 
 1. The host opens the projector window.
 2. The projector subscribes to the host-authorized deck query.
-3. The event begins on the welcome slide.
+3. The projector displays the current question; multi-question events can show a welcome slide from Manage poll.
 4. Audience devices opening the QR URL enter the event's presence room.
-5. The host sees the approximate connected count in the control room and on the welcome slide.
+5. The projector shows the approximate connected count.
 
 ### 4.4 Open a question
 
-1. The host selects a question slide.
-2. Selecting it changes only the deck position.
-3. The host explicitly chooses **Open voting**.
-4. One mutation verifies host access, closes any currently open question, marks the selected question open, and records its opening timestamp.
-5. Audience clients reactively receive the question.
-6. If configured, clients derive the timer from the authoritative opening timestamp and duration.
+1. The host chooses Start poll, or explicitly Reopen poll for a closed question.
+2. `polls.start` validates the saved question, closes any previously open question, opens the chosen question, and selects its slide in one transaction. Starting from the editor uses `polls.save` to include the unsaved edits.
+3. Audience clients reactively receive the question. If configured, clients derive the timer from the authoritative opening timestamp and duration.
+4. Saving an already-live question validates its options without restarting its countdown.
 
 ### 4.5 Submit a ballot
 
@@ -164,9 +150,9 @@ Client validation improves usability; the mutation is authoritative.
 1. At timer zero, the control room prompts the host to close voting but makes no state change.
 2. The host closes voting explicitly.
 3. The backend clears the event's open question and records the question's closed timestamp.
-4. Audience devices move to a waiting state.
+4. Audience devices continue to see final results for the current question; the voting form is removed. Late arrivals see the same final results.
 5. The projector continues to show the final chart until the host advances.
-6. The host selects another question or the finale.
+6. The host starts another question or finishes the event from Manage poll.
 
 Navigating to a closed question never reopens it. Reopening uses a separate explicit mutation.
 
@@ -367,7 +353,7 @@ Counter keys from obsolete event or question generations become unreachable imme
 Presence is partitioned by a room key derived from:
 
 ```ts
-`${eventId}:${generation}`
+`${eventId}:${generation}`;
 ```
 
 The event-scoped respondent token is used as the audience identity within that room. Host and projector clients do not join the audience room.
@@ -445,6 +431,9 @@ Function names are organized around user operations rather than generic CRUD end
 
 ### 10.1 Events
 
+- `polls.create` — atomically create a poll and optionally start it
+- `polls.save` — atomically save a question with all active options, attach uploaded images, and optionally start it
+- `polls.start` — select a saved question and open voting together
 - `events.create` — create an event from a client-generated host secret
 - `events.getHostWorkspace` — return host-authorized event settings and sequence summary
 - `events.updateDetails` — update title and description
@@ -486,9 +475,15 @@ The audience state query returns a discriminated union so the UI handles every s
 type AudienceState =
   | { kind: "notFound" }
   | { kind: "waiting"; eventTitle: string }
-  | { kind: "question"; question: AudienceQuestion; existingBallot?: SubmittedBallot }
+  | {
+      kind: "question";
+      question: AudienceQuestion;
+      existingBallot?: SubmittedBallot;
+    }
   | { kind: "finished"; eventTitle: string };
 ```
+
+An audience question includes `votingState: "open" | "closed"`; `votingOpenedAt` is optional and only supplied while open. A ready question remains private.
 
 The respondent token may be supplied to identify an existing ballot on the current question. The query returns that browser's submitted selection but never another respondent's token or ballot.
 
@@ -498,7 +493,7 @@ The respondent token may be supplied to identify an existing ballot on the curre
 - Question and choice update mutations attach returned storage IDs
 - Replaced or removed files are scheduled for deletion only after verifying they are no longer referenced
 
-Storage URLs are resolved during reads and are never persisted in application tables.
+Storage URLs are resolved during reads and are never persisted in application tables. The editor previews selected files locally and uploads them on save. Image IDs are attached in the same transaction as the question and options, before opening voting. On the homepage, image uploads first create a private event for host-authorized upload URLs; failed uploads retain that event for retry. Switching question tabs saves the draft without changing the presented question or opening voting.
 
 ## 11. Result calculation
 

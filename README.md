@@ -1,8 +1,8 @@
 # pollutant — live event polls
 
-A live audience-polling app: a host runs an event (questions, choices, voting,
-a projector view) and an audience joins from a QR code / link to vote in
-real time. No accounts — the host and audience are distinguished entirely by
+A live polling app: enter a question and answers, start the poll, and share
+a QR code or voting link. Watch results and end voting from the same screen.
+Save drafts, add more questions, or open a projector when needed. No accounts — the host and audience are distinguished entirely by
 which link you hold.
 
 The app lives at the repository root. Full product and design detail:
@@ -30,13 +30,13 @@ The app lives at the repository root. Full product and design detail:
 
 ## Routes
 
-| Route | Audience | Purpose |
-| --- | --- | --- |
-| `/` | Host | Dashboard: create an event, reopen/remove remembered events |
-| `/e/[publicSlug]` | Public | Audience voting view (join, vote, live results) |
-| `/host/[publicSlug]/[hostSecret]` | Host | Control room: author questions/choices, run voting, navigate the deck |
-| `/host/[publicSlug]/[hostSecret]/present` | Host | Read-only projector view (welcome QR, live question, finale) for a second screen |
-| `/host/[publicSlug]/[hostSecret]/results/[questionId]` | Host | Stable, host-only results for one question, independent of deck position |
+| Route                                                  | Audience | Purpose                                                                          |
+| ------------------------------------------------------ | -------- | -------------------------------------------------------------------------------- |
+| `/`                                                    | Host     | Create a poll or draft; reopen recent polls                                      |
+| `/e/[publicSlug]`                                      | Public   | Audience voting view (join, vote, live results)                                  |
+| `/host/[publicSlug]/[hostSecret]`                      | Host     | Poll workspace: edit, share, run voting, and watch results                       |
+| `/host/[publicSlug]/[hostSecret]/present`              | Host     | Read-only projector view (welcome QR, live question, finale) for a second screen |
+| `/host/[publicSlug]/[hostSecret]/results/[questionId]` | Host     | Stable, host-only results for one question, independent of deck position         |
 
 ## ⚠️ The host secret is a bearer credential
 
@@ -65,7 +65,7 @@ pnpm dev             # Next.js dev server
 ```
 
 Open the URL `pnpm dev` prints (Next picks a free port if the default is
-taken) and create an event from the dashboard.
+taken) and enter your first question.
 
 ## Verification
 
@@ -74,5 +74,6 @@ Run from the repository root:
 ```sh
 pnpm typecheck         # tsc --noEmit
 pnpm lint              # eslint .
+pnpm test              # backend lifecycle and UI interaction checks
 npx convex dev --once  # one-shot signed-in push; confirms the backend compiles and deploys
 ```

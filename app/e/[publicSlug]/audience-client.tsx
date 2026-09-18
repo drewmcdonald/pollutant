@@ -179,6 +179,7 @@ function AudienceQuestion({
     (draft.questionKey === questionKey && draft.locallySubmitted);
   const visibleError =
     audienceError?.questionKey === questionKey ? audienceError.message : null;
+  const closed = question.votingState === "closed";
   const atMaximum = selectedChoiceIds.length >= question.maxSelections;
   const validSelectionCount =
     selectedChoiceIds.length >= question.minSelections &&
@@ -212,7 +213,7 @@ function AudienceQuestion({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!validSelectionCount || submitted) return;
+    if (!validSelectionCount || submitted || closed) return;
 
     const submittedChoiceIds = [...selectedChoiceIds];
     setSubmitting(true);
@@ -264,6 +265,7 @@ function AudienceQuestion({
           Live poll
         </p>
         {!submitted &&
+          !closed &&
           question.countdownSeconds !== undefined &&
           question.votingOpenedAt !== undefined && (
             <Countdown
@@ -286,7 +288,7 @@ function AudienceQuestion({
           <h1 className="text-balance text-center text-xl font-semibold leading-snug sm:text-2xl">
             {question.prompt}
           </h1>
-          {!submitted && (
+          {!submitted && !closed && (
             <div className="flex items-center justify-center gap-2 text-center text-xs text-muted-foreground">
               <span>
                 {selectionGuidance(
@@ -304,14 +306,18 @@ function AudienceQuestion({
         </CardHeader>
 
         <CardContent>
-          {submitted ? (
+          {submitted || closed ? (
             <div className="flex flex-col gap-6">
               <div className="flex items-start gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4">
                 <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
                 <div>
-                  <p className="font-medium">Ballot submitted</p>
+                  <p className="font-medium">
+                    {closed ? "Voting has ended" : "Your vote is in"}
+                  </p>
                   <p className="mt-0.5 text-sm text-muted-foreground">
-                    Results update live while the host keeps voting open.
+                    {closed
+                      ? "Here are the final results."
+                      : "Watch the results update live."}
                   </p>
                 </div>
               </div>
@@ -323,8 +329,8 @@ function AudienceQuestion({
               </div>
               <div className="text-center text-xs leading-relaxed text-muted-foreground">
                 <p className="font-medium text-foreground">
-                  {question.ballotCount} ballot
-                  {question.ballotCount === 1 ? "" : "s"} submitted
+                  {question.ballotCount} vote
+                  {question.ballotCount === 1 ? "" : "s"}
                 </p>
                 {question.maxSelections > 1 && (
                   <p className="mt-1">
@@ -340,7 +346,9 @@ function AudienceQuestion({
                 <legend className="sr-only">Answer choices</legend>
                 {question.choices.map((choice) => {
                   const checked = selectedChoiceIds.includes(choice.choiceId);
-                  const disabled = submitting || (!checked && atMaximum);
+                  const disabled =
+                    submitting ||
+                    (question.maxSelections > 1 && !checked && atMaximum);
                   return (
                     <label
                       key={choice.choiceId}
@@ -358,11 +366,11 @@ function AudienceQuestion({
                         checked={checked}
                         disabled={disabled}
                         onChange={() => toggleChoice(choice.choiceId)}
-                        className="sr-only"
+                        className="peer sr-only"
                       />
                       <span
                         className={cn(
-                          "flex h-6 w-6 shrink-0 items-center justify-center border transition-colors",
+                          "flex h-6 w-6 shrink-0 items-center justify-center border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2",
                           question.maxSelections === 1
                             ? "rounded-full"
                             : "rounded-md",
@@ -407,12 +415,10 @@ function AudienceQuestion({
                 className="mt-1 w-full"
                 disabled={!validSelectionCount || submitting}
               >
-                {submitting ? "Submitting…" : "Submit ballot"}
+                {submitting ? "Submitting…" : "Vote"}
               </Button>
               <p className="text-center text-[11px] leading-relaxed text-muted-foreground">
-                You can submit one immutable ballot for this question. A zeroed
-                timer is only a cue; voting remains open until the host closes
-                it.
+                Choose carefully — you can vote once.
               </p>
             </form>
           )}

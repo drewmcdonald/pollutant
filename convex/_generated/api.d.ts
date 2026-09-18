@@ -18,6 +18,7 @@ import type * as lib_counters from "../lib/counters.js";
 import type * as lib_data from "../lib/data.js";
 import type * as lib_errors from "../lib/errors.js";
 import type * as lib_results from "../lib/results.js";
+import type * as polls from "../polls.js";
 import type * as presence from "../presence.js";
 import type * as presentation from "../presentation.js";
 import type * as questions from "../questions.js";
@@ -39,6 +40,7 @@ declare const fullApi: ApiFromModules<{
   "lib/data": typeof lib_data;
   "lib/errors": typeof lib_errors;
   "lib/results": typeof lib_results;
+  polls: typeof polls;
   presence: typeof presence;
   presentation: typeof presentation;
   questions: typeof questions;
