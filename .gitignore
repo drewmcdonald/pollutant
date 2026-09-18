@@ -40,3 +40,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .quickstart-logs
+
+# cursor (using .agents + .claude skills instead)
+.cursor/
