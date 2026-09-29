@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { ConvexError } from "convex/values";
-import { useQuery, usePaginatedQuery } from "convex/react";
+import { useMutation, useQuery, usePaginatedQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import { Crown, Loader2 } from "lucide-react";
 
@@ -190,6 +190,8 @@ function Projector({ publicSlug, hostSecret }: Props) {
           (currentQuestionResults !== null ? (
             <QuestionSlide
               key={`${currentQuestionResults.questionId}:${currentQuestionResults.votingState}`}
+              publicSlug={publicSlug}
+              hostSecret={hostSecret}
               question={currentQuestionResults}
               countdownSeconds={activeQuestion?.countdownSeconds}
               maxSelections={activeQuestion?.maxSelections}
@@ -232,16 +234,21 @@ function WelcomeSlide({
 }
 
 function QuestionSlide({
+  publicSlug,
+  hostSecret,
   question,
   countdownSeconds,
   maxSelections,
   votingOpenedAt,
 }: {
+  publicSlug: string;
+  hostSecret: string;
   question: QuestionResults;
   countdownSeconds: number | undefined;
   maxSelections: number | undefined;
   votingOpenedAt: number | undefined;
 }) {
+  const closeVoting = useMutation(api.presentation.closeVoting);
   const winners = question.choices.filter((choice) => choice.winner);
   const closedWithWinner =
     question.votingState === "closed" && winners.length > 0;
@@ -264,6 +271,9 @@ function QuestionSlide({
               countdownSeconds={countdownSeconds}
               openedAt={votingOpenedAt}
               size="large"
+              onExpired={() => {
+                void closeVoting({ publicSlug, hostSecret }).catch(() => {});
+              }}
             />
           )}
       </div>

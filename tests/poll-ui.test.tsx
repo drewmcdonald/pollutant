@@ -436,6 +436,7 @@ describe("audience voting", () => {
       expect.objectContaining({ selectedChoiceIds: ["choice-2"] }),
     );
     expect(screen.getByText("Your vote is in")).toBeTruthy();
+    expect(screen.queryByText("Live poll")).toBeNull();
   });
 
   test("question images share a reading width and are not cropped", () => {
@@ -1054,6 +1055,62 @@ describe("projector backgrounds and winner celebration", () => {
     } finally {
       HTMLCanvasElement.prototype.getContext = originalGetContext;
     }
+  });
+
+  test("an expired present countdown closes voting", async () => {
+    mocks.mutation.mockResolvedValue(null);
+    mocks.query.mockImplementation((reference) => {
+      switch (getFunctionName(reference)) {
+        case "presentation:getDeck":
+          return {
+            event: {
+              title: "Lunch?",
+              currentSlide: { kind: "question", questionId: "question-1" },
+              votingOpenedAt: 1,
+            },
+            questions: [{ _id: "question-1", countdownSeconds: 5 }],
+            currentQuestionResults: {
+              questionId: "question-1",
+              position: 0,
+              prompt: "Lunch?",
+              imageUrl: null,
+              backgroundPreset: null,
+              backgroundImageUrl: null,
+              ballotCount: 3,
+              votingState: "open",
+              choices: [
+                {
+                  choiceId: "choice-1",
+                  label: "Pizza",
+                  imageUrl: null,
+                  archived: false,
+                  selections: 2,
+                  respondentPercentage: 66.7,
+                  winner: true,
+                },
+                {
+                  choiceId: "choice-2",
+                  label: "Tacos",
+                  imageUrl: null,
+                  archived: false,
+                  selections: 1,
+                  respondentPercentage: 33.3,
+                  winner: false,
+                },
+              ],
+            },
+          };
+        case "presence:getConnectedCount":
+          return { connectedCount: 4 };
+      }
+    });
+    render(<ProjectorClient publicSlug="test-poll" hostSecret="host-secret" />);
+    await waitFor(() => {
+      expect(mocks.mutation).toHaveBeenCalledWith({
+        publicSlug: "test-poll",
+        hostSecret: "host-secret",
+      });
+    });
   });
 
   test("an open question with no votes still lists every nominee at 0", () => {

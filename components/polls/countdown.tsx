@@ -1,26 +1,34 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Timer } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
 /**
- * Renders the advisory countdown described in system-design.md §6:
- * remainingMs = max(0, openedAt + countdownSeconds*1000 - now). This is a
- * presentation cue only — the server keeps accepting ballots at zero until
- * the host explicitly closes voting.
+ * Renders the countdown from openedAt + countdownSeconds. Host surfaces
+ * pass `onExpired` so voting can close and Present can play the winner
+ * celebration; the audience timer is display-only.
  */
 export function Countdown({
   countdownSeconds,
   openedAt,
   size = "default",
+  onExpired,
 }: {
   countdownSeconds: number;
   openedAt: number;
   size?: "default" | "large";
+  onExpired?: () => void;
 }) {
   const [now, setNow] = useState(() => Date.now());
+  const onExpiredRef = useRef(onExpired);
+  const notifiedFor = useRef<string | null>(null);
+  const expiryKey = `${openedAt}:${countdownSeconds}`;
+
+  useEffect(() => {
+    onExpiredRef.current = onExpired;
+  }, [onExpired]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 250);
@@ -28,12 +36,20 @@ export function Countdown({
   }, []);
 
   const remainingMs = Math.max(0, openedAt + countdownSeconds * 1000 - now);
+  const expired = remainingMs === 0;
+
+  useEffect(() => {
+    if (!expired) return;
+    if (notifiedFor.current === expiryKey) return;
+    notifiedFor.current = expiryKey;
+    onExpiredRef.current?.();
+  }, [expired, expiryKey]);
+
   const remainingSeconds = Math.ceil(remainingMs / 1000);
   const mm = Math.floor(remainingSeconds / 60)
     .toString()
     .padStart(2, "0");
   const ss = (remainingSeconds % 60).toString().padStart(2, "0");
-  const expired = remainingMs === 0;
 
   return (
     <div
