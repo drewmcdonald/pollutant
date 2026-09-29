@@ -14,6 +14,10 @@ import { Crown, Loader2 } from "lucide-react";
 
 import { api } from "@/convex/_generated/api";
 import { Confetti } from "@/components/polls/confetti";
+import {
+  QuestionImages,
+  questionImageUrls,
+} from "@/components/polls/question-images";
 import { Countdown } from "@/components/polls/countdown";
 import { PresencePill } from "@/components/polls/presence-pill";
 import { QrBlock } from "@/components/polls/qr-block";
@@ -177,7 +181,7 @@ function Projector({ publicSlug, hostSecret }: Props) {
         <PresencePill count={connectedCount} size="large" />
       </header>
 
-      <div className="flex flex-1 flex-col items-center justify-center gap-10 py-10">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-10 overflow-y-auto py-10">
         {event.currentSlide.kind === "welcome" && (
           <WelcomeSlide title={event.title} audienceUrl={audienceUrl} />
         )}
@@ -264,15 +268,6 @@ function QuestionSlide({
           )}
       </div>
 
-      {question.imageUrl !== null && (
-        // eslint-disable-next-line @next/next/no-img-element -- Convex storage URL: host is per-deployment/dynamic, so next/image can't safely whitelist it via remotePatterns.
-        <img
-          src={question.imageUrl}
-          alt=""
-          className="max-h-72 rounded-xl border border-white/20 object-contain shadow-lg"
-        />
-      )}
-
       <h1 className="max-w-4xl text-balance text-center text-5xl font-semibold leading-tight text-white drop-shadow-[0_2px_16px_rgba(0,0,0,0.85)]">
         {question.prompt}
       </h1>
@@ -281,6 +276,11 @@ function QuestionSlide({
           {question.description}
         </p>
       )}
+      <QuestionImages
+        urls={questionImageUrls(question.imageUrls, question.imageUrl)}
+        alt=""
+        size="present"
+      />
 
       {revealed && (
         <p className="text-sm font-semibold uppercase tracking-[0.28em] text-amber-200">
@@ -288,47 +288,39 @@ function QuestionSlide({
         </p>
       )}
 
-      {question.ballotCount === 0 ? (
-        <p className="text-lg text-white/70">Waiting for the first response…</p>
-      ) : (
-        <div className="flex w-full max-w-3xl flex-col">
-          {question.choices.map((choice) => {
-            const winner = revealed && choice.winner;
-            const loser = revealed && !choice.winner;
-            return (
+      <div className="flex w-full max-w-3xl flex-col">
+        {question.choices.map((choice) => {
+          const winner = revealed && choice.winner;
+          const loser = revealed && !choice.winner;
+          return (
+            <div
+              key={choice.choiceId}
+              data-winner-focus={winner ? "true" : "false"}
+              className={cn(
+                "grid transition-[grid-template-rows,opacity,transform] duration-700 ease-out motion-reduce:transition-none",
+                loser
+                  ? "grid-rows-[0fr] scale-90 opacity-0"
+                  : "grid-rows-[1fr]",
+                winner && "z-10 scale-110",
+              )}
+            >
               <div
-                key={choice.choiceId}
-                data-winner-focus={winner ? "true" : "false"}
-                className={cn(
-                  "grid transition-[grid-template-rows,opacity,transform] duration-700 ease-out motion-reduce:transition-none",
-                  loser
-                    ? "grid-rows-[0fr] scale-90 opacity-0"
-                    : "grid-rows-[1fr]",
-                  winner && "z-10 scale-110",
-                )}
+                className={cn(loser ? "overflow-hidden" : "overflow-visible")}
               >
                 <div
-                  className={cn(loser ? "overflow-hidden" : "overflow-visible")}
+                  className={cn(
+                    "py-3",
+                    winner &&
+                      "rounded-2xl bg-black/55 px-4 ring-2 ring-amber-300",
+                  )}
                 >
-                  <div
-                    className={cn(
-                      "py-3",
-                      winner &&
-                        "rounded-2xl bg-black/55 px-4 ring-2 ring-amber-300",
-                    )}
-                  >
-                    <ResultsBar
-                      choice={choice}
-                      highContrast
-                      prominent={winner}
-                    />
-                  </div>
+                  <ResultsBar choice={choice} highContrast prominent={winner} />
                 </div>
               </div>
-            );
-          })}
-        </div>
-      )}
+            </div>
+          );
+        })}
+      </div>
 
       <footer className="text-center text-sm text-white/75">
         {question.ballotCount} ballot{question.ballotCount === 1 ? "" : "s"}{" "}
@@ -388,14 +380,13 @@ function FinaleQuestionCard({ question }: { question: QuestionResults }) {
   const winners = question.choices.filter((choice) => choice.winner);
   return (
     <div className="w-full rounded-xl border border-white/10 bg-white/5 p-6">
-      {question.imageUrl !== null && (
-        // eslint-disable-next-line @next/next/no-img-element -- Convex storage URL: host is per-deployment/dynamic, so next/image can't safely whitelist it via remotePatterns.
-        <img
-          src={question.imageUrl}
+      <div className="mb-4">
+        <QuestionImages
+          urls={questionImageUrls(question.imageUrls, question.imageUrl)}
           alt=""
-          className="mb-4 max-h-48 w-full rounded-lg border border-white/10 object-cover"
+          size="host"
         />
-      )}
+      </div>
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="min-w-0">
           <h2 className="text-xl font-semibold">{question.prompt}</h2>

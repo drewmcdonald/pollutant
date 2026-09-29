@@ -68,6 +68,7 @@ describe("poll setup", () => {
       {
         prompt: "Lunch?",
         description: "",
+        questionImages: [{}, {}, {}],
         choices: [{ label: "Pizza" }, { label: "Tacos" }],
         minSelections: 1,
         maxSelections: 1,
@@ -85,6 +86,38 @@ describe("poll setup", () => {
     await user.click(screen.getByRole("button", { name: "Save draft" }));
     expect(save).toHaveBeenCalledWith(
       expect.objectContaining({ backgroundPreset: "liquid-violet" }),
+      false,
+    );
+  });
+
+  test("the host can attach up to three question images", async () => {
+    const user = userEvent.setup();
+    const save = vi.fn().mockResolvedValue(undefined);
+    render(<PollEditor busy={false} onSave={save} />);
+    const files = [1, 2, 3].map(
+      (slot) => new File(["image"], `q${slot}.png`, { type: "image/png" }),
+    );
+    await user.upload(
+      screen.getByLabelText("Choose question image 1"),
+      files[0],
+    );
+    await user.upload(
+      screen.getByLabelText("Choose question image 2"),
+      files[1],
+    );
+    await user.upload(
+      screen.getByLabelText("Choose question image 3"),
+      files[2],
+    );
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        questionImages: [
+          { imageFile: files[0] },
+          { imageFile: files[1] },
+          { imageFile: files[2] },
+        ],
+      }),
       false,
     );
   });
@@ -405,7 +438,30 @@ describe("audience voting", () => {
     expect(screen.getByText("Your vote is in")).toBeTruthy();
   });
 
-  test("a question image widens the voter card to the picture", () => {
+  test("question images share a reading width and are not cropped", () => {
+    mocks.query.mockReturnValue({
+      ...audienceState,
+      question: {
+        ...audienceState.question,
+        imageUrl: "https://example.com/wide.png",
+        imageUrls: [
+          "https://example.com/wide.png",
+          "https://example.com/tall.png",
+        ],
+      },
+    });
+    render(<AudienceClient publicSlug="test-poll" />);
+    const images = document.querySelectorAll("img");
+    expect(images).toHaveLength(2);
+    for (const image of images) {
+      expect(image.className).toContain("w-full");
+      expect(image.className).not.toContain("object-cover");
+      expect(image.className).not.toContain("max-h-");
+    }
+    expect(images[0].parentElement?.className).toContain("max-w-4xl");
+  });
+
+  test("double-clicking a question image opens a focus preview", () => {
     mocks.query.mockReturnValue({
       ...audienceState,
       question: {
@@ -414,14 +470,41 @@ describe("audience voting", () => {
       },
     });
     render(<AudienceClient publicSlug="test-poll" />);
-    const image = screen.getByRole("img", {
-      name: "Illustration for Lunch?",
+    fireEvent.doubleClick(
+      screen.getByRole("img", { name: "Illustration for Lunch?" }),
+    );
+    expect(screen.getByRole("dialog", { name: "Image preview" })).toBeTruthy();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Image preview" })).toBeNull();
+  });
+
+  test("preview arrows cycle through question images", () => {
+    mocks.query.mockReturnValue({
+      ...audienceState,
+      question: {
+        ...audienceState.question,
+        imageUrl: "https://example.com/wide.png",
+        imageUrls: [
+          "https://example.com/wide.png",
+          "https://example.com/tall.png",
+        ],
+      },
     });
-    expect(image.className).not.toContain("object-cover");
-    Object.defineProperty(image, "naturalWidth", { value: 960 });
-    fireEvent.load(image);
-    expect(image.parentElement?.parentElement?.getAttribute("style")).toContain(
-      "960px",
+    render(<AudienceClient publicSlug="test-poll" />);
+    fireEvent.doubleClick(
+      screen.getByRole("img", { name: "Illustration for Lunch?" }),
+    );
+    const preview = screen.getByRole("dialog", { name: "Image preview" });
+    expect(preview.querySelector("img")?.getAttribute("src")).toBe(
+      "https://example.com/wide.png",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Next image" }));
+    expect(preview.querySelector("img")?.getAttribute("src")).toBe(
+      "https://example.com/tall.png",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Previous image" }));
+    expect(preview.querySelector("img")?.getAttribute("src")).toBe(
+      "https://example.com/wide.png",
     );
   });
 
@@ -971,5 +1054,58 @@ describe("projector backgrounds and winner celebration", () => {
     } finally {
       HTMLCanvasElement.prototype.getContext = originalGetContext;
     }
+  });
+
+  test("an open question with no votes still lists every nominee at 0", () => {
+    mocks.query.mockImplementation((reference) => {
+      switch (getFunctionName(reference)) {
+        case "presentation:getDeck":
+          return {
+            event: {
+              title: "Lunch?",
+              currentSlide: { kind: "question", questionId: "question-1" },
+            },
+            questions: [{ _id: "question-1" }],
+            currentQuestionResults: {
+              questionId: "question-1",
+              position: 0,
+              prompt: "Lunch?",
+              imageUrl: null,
+              backgroundPreset: null,
+              backgroundImageUrl: null,
+              ballotCount: 0,
+              votingState: "open",
+              choices: [
+                {
+                  choiceId: "choice-1",
+                  label: "Pizza",
+                  imageUrl: null,
+                  archived: false,
+                  selections: 0,
+                  respondentPercentage: 0,
+                  winner: false,
+                },
+                {
+                  choiceId: "choice-2",
+                  label: "Tacos",
+                  imageUrl: null,
+                  archived: false,
+                  selections: 0,
+                  respondentPercentage: 0,
+                  winner: false,
+                },
+              ],
+            },
+          };
+        case "presence:getConnectedCount":
+          return { connectedCount: 2 };
+      }
+    });
+    render(<ProjectorClient publicSlug="test-poll" hostSecret="host-secret" />);
+    expect(screen.queryByText("Waiting for the first response…")).toBeNull();
+    expect(screen.getByText("Pizza")).toBeTruthy();
+    expect(screen.getByText("Tacos")).toBeTruthy();
+    expect(screen.getAllByText("0 · 0.0%")).toHaveLength(2);
+    expect(screen.getByText("0 ballots submitted")).toBeTruthy();
   });
 });

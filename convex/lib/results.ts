@@ -8,6 +8,7 @@ import {
 } from "./counters";
 import { backgroundPresetValidator } from "./backgrounds";
 import { loadActiveChoices } from "./data";
+import { questionImageIds } from "./questionImages";
 
 type ReadCtx = QueryCtx | MutationCtx;
 
@@ -43,6 +44,7 @@ export const questionResultsValidator = v.object({
   prompt: v.string(),
   description: v.union(v.string(), v.null()),
   imageUrl: v.union(v.string(), v.null()),
+  imageUrls: v.array(v.string()),
   backgroundPreset: v.union(backgroundPresetValidator, v.null()),
   backgroundImageUrl: v.union(v.string(), v.null()),
   ballotCount: v.number(),
@@ -121,7 +123,7 @@ async function computeQuestionResults(
     ballotCount,
     choiceCounts,
     choiceImageUrls,
-    questionImageUrl,
+    questionImageUrls,
     backgroundImageUrl,
   ] = await Promise.all([
     readBallotCount(ctx, scope),
@@ -135,13 +137,16 @@ async function computeQuestionResults(
           : ctx.storage.getUrl(choice.imageId),
       ),
     ),
-    question.imageId === undefined
-      ? Promise.resolve(null)
-      : ctx.storage.getUrl(question.imageId),
+    Promise.all(
+      questionImageIds(question).map((imageId) => ctx.storage.getUrl(imageId)),
+    ),
     question.backgroundImageId === undefined
       ? Promise.resolve(null)
       : ctx.storage.getUrl(question.backgroundImageId),
   ]);
+  const imageUrls = questionImageUrls.filter(
+    (url): url is string => url !== null,
+  );
 
   let maxSelections = 0;
   for (const count of choiceCounts) {
@@ -166,7 +171,8 @@ async function computeQuestionResults(
     position: question.position,
     prompt: question.prompt,
     description: question.description ?? null,
-    imageUrl: questionImageUrl,
+    imageUrl: imageUrls[0] ?? null,
+    imageUrls,
     backgroundPreset: question.backgroundPreset ?? null,
     backgroundImageUrl,
     ballotCount,

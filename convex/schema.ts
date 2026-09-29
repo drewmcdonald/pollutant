@@ -26,6 +26,8 @@ export default defineSchema({
     prompt: v.string(),
     description: v.optional(v.string()),
     imageId: v.optional(v.id("_storage")),
+    imageId2: v.optional(v.id("_storage")),
+    imageId3: v.optional(v.id("_storage")),
     backgroundPreset: v.optional(backgroundPresetValidator),
     backgroundImageId: v.optional(v.id("_storage")),
     minSelections: v.number(),
@@ -42,6 +44,8 @@ export default defineSchema({
       "position",
     ])
     .index("by_image_id", ["imageId"])
+    .index("by_image_id_2", ["imageId2"])
+    .index("by_image_id_3", ["imageId3"])
     .index("by_background_image_id", ["backgroundImageId"]),
 
   choices: defineTable({

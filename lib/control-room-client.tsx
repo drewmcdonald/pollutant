@@ -11,6 +11,10 @@ import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { PageContainer } from "@/components/polls/page-container";
 import { PollEditor, type PollDraft } from "@/components/polls/poll-editor";
+import {
+  QuestionImages,
+  questionImageUrls,
+} from "@/components/polls/question-images";
 import { SharePoll, CopyLinkButton } from "@/components/polls/share-poll";
 import { ResultsBar } from "@/components/polls/results-bar";
 import { VotingStatusBadge } from "@/components/polls/status-badge";
@@ -479,14 +483,14 @@ function ControlRoom({
                       </p>
                     )}
                   </div>
-                  {results?.imageUrl && (
-                    // eslint-disable-next-line @next/next/no-img-element -- Convex storage URLs are deployment-specific.
-                    <img
-                      src={results.imageUrl}
-                      alt="Question illustration"
-                      className="max-h-72 rounded-lg object-contain"
-                    />
-                  )}
+                  <QuestionImages
+                    urls={questionImageUrls(
+                      results?.imageUrls,
+                      results?.imageUrl,
+                    )}
+                    alt="Question illustration"
+                    size="host"
+                  />
                   {results ? (
                     <div className="space-y-4" aria-live="polite">
                       {results.choices.map((choice) => (
@@ -761,6 +765,9 @@ function ExistingQuestionForm({
         prompt: original.question.prompt,
         description: original.question.description ?? "",
         imageUrl: original.question.imageUrl,
+        questionImages: [0, 1, 2].map((index) => ({
+          imageUrl: original.question.imageUrls?.[index] ?? null,
+        })),
         backgroundPreset: original.question.backgroundPreset ?? undefined,
         backgroundImageUrl: original.question.backgroundImageUrl,
         position: original.question.position,

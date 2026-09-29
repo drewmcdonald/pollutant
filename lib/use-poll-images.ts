@@ -14,6 +14,7 @@ export function hasPendingImages(draft: PollDraft) {
   return (
     !!draft.imageFile ||
     !!draft.backgroundImageFile ||
+    !!draft.questionImages?.some((image) => !!image.imageFile) ||
     draft.choices.some((choice) => !!choice.imageFile)
   );
 }
@@ -62,6 +63,13 @@ export function usePollImages() {
     const backgroundImageId = await storageIdFor(draft.backgroundImageFile);
     const backgroundPreset: BackgroundPreset | undefined =
       draft.backgroundPreset;
+    const questionImageIds = [
+      await storageIdFor(
+        draft.questionImages?.[0]?.imageFile ?? draft.imageFile,
+      ),
+      await storageIdFor(draft.questionImages?.[1]?.imageFile),
+      await storageIdFor(draft.questionImages?.[2]?.imageFile),
+    ];
     return {
       prompt: draft.prompt,
       description: draft.description ?? "",
@@ -72,7 +80,13 @@ export function usePollImages() {
         : {}),
       ...(backgroundPreset !== undefined ? { backgroundPreset } : {}),
       ...(backgroundImageId !== undefined ? { backgroundImageId } : {}),
-      ...imageFields(await storageIdFor(draft.imageFile)),
+      ...imageFields(questionImageIds[0]),
+      ...(questionImageIds[1] === undefined
+        ? {}
+        : { imageId2: questionImageIds[1] }),
+      ...(questionImageIds[2] === undefined
+        ? {}
+        : { imageId3: questionImageIds[2] }),
       choices,
     };
   };
