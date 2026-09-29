@@ -7,6 +7,10 @@ import {
   type MutationCtx,
 } from "./_generated/server";
 import { requireHost } from "./lib/auth";
+import {
+  backgroundPresetValidator,
+  type BackgroundPreset,
+} from "./lib/backgrounds";
 import { requireChoiceInEvent, requireQuestionInEvent } from "./lib/data";
 import { appError } from "./lib/errors";
 
@@ -121,6 +125,55 @@ export const setChoiceImage = mutation({
   },
 });
 
+export const setQuestionBackground = mutation({
+  args: {
+    publicSlug: v.string(),
+    hostSecret: v.string(),
+    questionId: v.id("questions"),
+    preset: v.optional(v.union(backgroundPresetValidator, v.null())),
+    storageId: v.optional(v.union(v.id("_storage"), v.null())),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const event = await requireHost(ctx, args.publicSlug, args.hostSecret);
+    const question = await requireQuestionInEvent(
+      ctx,
+      args.questionId,
+      event._id,
+    );
+
+    const patch: {
+      backgroundPreset?: BackgroundPreset;
+      backgroundImageId?: Id<"_storage">;
+    } = {};
+    if (args.preset !== undefined) {
+      patch.backgroundPreset = args.preset ?? undefined;
+    }
+    let previousBackgroundId: Id<"_storage"> | undefined;
+    if (args.storageId !== undefined) {
+      const nextImageId = args.storageId ?? undefined;
+      if (nextImageId !== undefined) {
+        await requireValidImage(ctx, nextImageId);
+      }
+      patch.backgroundImageId = nextImageId;
+      previousBackgroundId = question.backgroundImageId;
+    }
+
+    if (args.preset !== undefined || args.storageId !== undefined) {
+      await ctx.db.patch(question._id, patch);
+    }
+    if (args.storageId !== undefined) {
+      await scheduleCleanupIfChanged(
+        ctx,
+        previousBackgroundId,
+        args.storageId ?? undefined,
+      );
+    }
+
+    return null;
+  },
+});
+
 /**
  * Deletes a storage object only if no question or choice still references
  * it, using the existing `by_image_id` indexes with bounded `.first()`
@@ -145,6 +198,16 @@ export const deleteIfUnreferenced = internalMutation({
       .withIndex("by_image_id", (q) => q.eq("imageId", args.storageId))
       .first();
     if (referencingChoice !== null) {
+      return null;
+    }
+
+    const referencingBackground = await ctx.db
+      .query("questions")
+      .withIndex("by_background_image_id", (q) =>
+        q.eq("backgroundImageId", args.storageId),
+      )
+      .first();
+    if (referencingBackground !== null) {
       return null;
     }
 

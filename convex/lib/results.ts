@@ -6,6 +6,7 @@ import {
   readChoiceCount,
   type CounterScope,
 } from "./counters";
+import { backgroundPresetValidator } from "./backgrounds";
 import { loadActiveChoices } from "./data";
 
 type ReadCtx = QueryCtx | MutationCtx;
@@ -38,8 +39,11 @@ export type ChoiceResult = Infer<typeof choiceResultValidator>;
 
 export const questionResultsValidator = v.object({
   questionId: v.id("questions"),
+  position: v.number(),
   prompt: v.string(),
   imageUrl: v.union(v.string(), v.null()),
+  backgroundPreset: v.union(backgroundPresetValidator, v.null()),
+  backgroundImageUrl: v.union(v.string(), v.null()),
   ballotCount: v.number(),
   votingState: votingStateValidator,
   choices: v.array(choiceResultValidator),
@@ -112,23 +116,31 @@ async function computeQuestionResults(
     responseGeneration: question.responseGeneration,
   };
 
-  const [ballotCount, choiceCounts, choiceImageUrls, questionImageUrl] =
-    await Promise.all([
-      readBallotCount(ctx, scope),
-      Promise.all(
-        choices.map((choice) => readChoiceCount(ctx, scope, choice._id)),
+  const [
+    ballotCount,
+    choiceCounts,
+    choiceImageUrls,
+    questionImageUrl,
+    backgroundImageUrl,
+  ] = await Promise.all([
+    readBallotCount(ctx, scope),
+    Promise.all(
+      choices.map((choice) => readChoiceCount(ctx, scope, choice._id)),
+    ),
+    Promise.all(
+      choices.map((choice) =>
+        choice.imageId === undefined
+          ? Promise.resolve(null)
+          : ctx.storage.getUrl(choice.imageId),
       ),
-      Promise.all(
-        choices.map((choice) =>
-          choice.imageId === undefined
-            ? Promise.resolve(null)
-            : ctx.storage.getUrl(choice.imageId),
-        ),
-      ),
-      question.imageId === undefined
-        ? Promise.resolve(null)
-        : ctx.storage.getUrl(question.imageId),
-    ]);
+    ),
+    question.imageId === undefined
+      ? Promise.resolve(null)
+      : ctx.storage.getUrl(question.imageId),
+    question.backgroundImageId === undefined
+      ? Promise.resolve(null)
+      : ctx.storage.getUrl(question.backgroundImageId),
+  ]);
 
   let maxSelections = 0;
   for (const count of choiceCounts) {
@@ -150,8 +162,11 @@ async function computeQuestionResults(
 
   return {
     questionId: question._id,
+    position: question.position,
     prompt: question.prompt,
     imageUrl: questionImageUrl,
+    backgroundPreset: question.backgroundPreset ?? null,
+    backgroundImageUrl,
     ballotCount,
     votingState: computeVotingState(event, question),
     choices: choiceResults,

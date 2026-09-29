@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { backgroundPresetValidator } from "./lib/backgrounds";
 
 const currentSlide = v.union(
   v.object({ kind: v.literal("welcome") }),
@@ -24,6 +25,8 @@ export default defineSchema({
     position: v.number(),
     prompt: v.string(),
     imageId: v.optional(v.id("_storage")),
+    backgroundPreset: v.optional(backgroundPresetValidator),
+    backgroundImageId: v.optional(v.id("_storage")),
     minSelections: v.number(),
     maxSelections: v.number(),
     countdownSeconds: v.optional(v.number()),
@@ -37,7 +40,8 @@ export default defineSchema({
       "archivedAt",
       "position",
     ])
-    .index("by_image_id", ["imageId"]),
+    .index("by_image_id", ["imageId"])
+    .index("by_background_image_id", ["backgroundImageId"]),
 
   choices: defineTable({
     questionId: v.id("questions"),

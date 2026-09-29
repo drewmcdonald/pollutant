@@ -7,7 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ImageControl } from "@/components/polls/image-control";
+import {
+  PROJECTOR_BACKGROUNDS,
+  presetForPosition,
+  type BackgroundPreset,
+} from "@/lib/background-presets";
 import { validateImageFile } from "@/lib/image-upload";
+import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 
 type DraftImage = { imageFile?: File | null; imageUrl?: string | null };
@@ -17,6 +23,10 @@ export type PollDraft = DraftImage & {
   minSelections: number;
   maxSelections: number;
   countdownSeconds?: number;
+  backgroundPreset?: BackgroundPreset;
+  backgroundImageFile?: File | null;
+  backgroundImageUrl?: string | null;
+  position?: number;
 };
 
 type Props = {
@@ -32,6 +42,7 @@ type Props = {
     draft: PollDraft,
     questionId: Id<"questions">,
   ) => Promise<void>;
+  position?: number;
 };
 
 export function PollEditor({
@@ -44,6 +55,7 @@ export function PollEditor({
   canAddQuestion = true,
   onCancel,
   onSelectQuestion,
+  position = 0,
 }: Props) {
   const [prompt, setPrompt] = useState(initial?.prompt ?? "");
   const inputRefs = useRef(new Map<number, HTMLInputElement>());
@@ -66,6 +78,13 @@ export function PollEditor({
   const [error, setError] = useState<string | null>(null);
   const [questionImage, setQuestionImage] = useState<DraftImage>({
     imageUrl: initial?.imageUrl,
+  });
+  const [backgroundPreset, setBackgroundPreset] = useState<BackgroundPreset>(
+    initial?.backgroundPreset ??
+      presetForPosition(initial?.position ?? position),
+  );
+  const [backgroundImage, setBackgroundImage] = useState<DraftImage>({
+    imageUrl: initial?.backgroundImageUrl,
   });
   const previewUrls = useRef(new Set<string>());
   useEffect(() => {
@@ -92,6 +111,25 @@ export function PollEditor({
       setChoices((rows) =>
         rows.map((row) => (row.key === key ? { ...row, ...image } : row)),
       );
+  }
+
+  function chooseBackground(file: File | null) {
+    setError(null);
+    if (file) {
+      const invalid = validateImageFile(file);
+      if (invalid) {
+        setError(invalid);
+        return;
+      }
+    }
+    const imageUrl = file ? URL.createObjectURL(file) : null;
+    if (imageUrl) previewUrls.current.add(imageUrl);
+    setBackgroundImage({ imageFile: file, imageUrl });
+  }
+
+  function selectBackgroundPreset(preset: BackgroundPreset) {
+    setBackgroundPreset(preset);
+    chooseBackground(null);
   }
 
   function addChoice() {
@@ -142,6 +180,10 @@ export function PollEditor({
       minSelections: multiple ? Number(min) : 1,
       maxSelections: multiple ? Number(max) : 1,
       ...(timer.trim() ? { countdownSeconds: Number(timer) } : {}),
+      backgroundPreset,
+      ...(backgroundImage.imageFile !== undefined
+        ? { backgroundImageFile: backgroundImage.imageFile }
+        : {}),
     };
     if (
       !Number.isInteger(draft.minSelections) ||
@@ -287,6 +329,53 @@ export function PollEditor({
           >
             <Plus /> Add option
           </Button>
+        </div>
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <Label>Projector background</Label>
+            <p className="text-xs text-muted-foreground">
+              Shown behind this question on the present screen. A dark scrim
+              keeps the question and answers readable.
+            </p>
+          </div>
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+            {PROJECTOR_BACKGROUNDS.map((preset) => {
+              const selected =
+                !backgroundImage.imageUrl && backgroundPreset === preset.id;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  aria-pressed={selected}
+                  aria-label={preset.label}
+                  className={cn(
+                    "h-16 rounded-lg bg-cover bg-center ring-offset-2 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    selected
+                      ? "ring-2 ring-primary"
+                      : "opacity-80 hover:opacity-100",
+                  )}
+                  style={{ backgroundImage: `url("${preset.src}")` }}
+                  onClick={() => selectBackgroundPreset(preset.id)}
+                />
+              );
+            })}
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {backgroundImage.imageUrl
+              ? "Custom image"
+              : PROJECTOR_BACKGROUNDS.find(
+                  (preset) => preset.id === backgroundPreset,
+                )?.label}
+          </p>
+          <ImageControl
+            imageUrl={backgroundImage.imageUrl ?? null}
+            label="Custom projector background"
+            uploading={false}
+            progress={undefined}
+            disabled={busy}
+            onUpload={chooseBackground}
+            onRemove={() => chooseBackground(null)}
+          />
         </div>
         <details className="rounded-lg border px-4 py-3">
           <summary className="cursor-pointer text-sm font-medium">

@@ -415,6 +415,7 @@ function ControlRoom({
                 <PollEditor
                   key={`new-${formRevision}`}
                   busy={busy}
+                  position={deck.questions.length}
                   onSave={(draft, shouldStart) => savePoll(draft, shouldStart)}
                   onAddQuestion={(draft) =>
                     savePoll(draft, false, undefined, [], "new")
@@ -752,6 +753,9 @@ function ExistingQuestionForm({
       initial={{
         prompt: original.question.prompt,
         imageUrl: original.question.imageUrl,
+        backgroundPreset: original.question.backgroundPreset ?? undefined,
+        backgroundImageUrl: original.question.backgroundImageUrl,
+        position: original.question.position,
         choices: active.map((choice) => ({
           id: choice._id,
           label: choice.label,

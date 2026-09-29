@@ -367,6 +367,62 @@ describe("saving poll images", () => {
     ).toBe(nextImageId);
   });
 
+  test("each question starts on its own projector background and the host can replace it", async () => {
+    const { t, host, saved } = await setup();
+    const first = await t.query(api.questions.getHostDetail, {
+      ...host,
+      questionId: saved.questionId,
+    });
+    expect(first.question.backgroundPreset).toBe("rose-glow");
+    expect(first.question.backgroundImageUrl).toBeNull();
+
+    const second = await t.mutation(api.polls.save, {
+      ...host,
+      prompt: "Second?",
+      choices: [{ label: "A" }, { label: "B" }],
+      minSelections: 1,
+      maxSelections: 1,
+      start: false,
+      expectedChoiceIds: [],
+    });
+    const secondDetail = await t.query(api.questions.getHostDetail, {
+      ...host,
+      questionId: second.questionId,
+    });
+    expect(secondDetail.question.backgroundPreset).toBe("color-wash");
+
+    await t.mutation(api.polls.save, {
+      ...saved,
+      backgroundPreset: "liquid-violet",
+    });
+    const recolored = await t.query(api.questions.getHostDetail, {
+      ...host,
+      questionId: saved.questionId,
+    });
+    expect(recolored.question.backgroundPreset).toBe("liquid-violet");
+
+    const imageId = await storeFile(t, "image/png", "background");
+    await t.mutation(api.polls.save, {
+      ...saved,
+      backgroundImageId: imageId,
+    });
+    const withImage = await t.query(api.presentation.getDeck, host);
+    expect(withImage.currentQuestionResults?.backgroundImageUrl).toBeTruthy();
+    expect(withImage.currentQuestionResults?.backgroundPreset).toBe(
+      "liquid-violet",
+    );
+
+    await t.mutation(api.polls.save, {
+      ...saved,
+      backgroundImageId: null,
+    });
+    const cleared = await t.query(api.presentation.getDeck, host);
+    expect(cleared.currentQuestionResults?.backgroundImageUrl).toBeNull();
+    expect(cleared.currentQuestionResults?.backgroundPreset).toBe(
+      "liquid-violet",
+    );
+  });
+
   test("invalid image files roll back the question, options, and live state", async () => {
     const { t, host, saved } = await setup();
     const imageId = await storeFile(t, "text/plain");

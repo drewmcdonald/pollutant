@@ -13,6 +13,10 @@ import {
   reindexQuestionPositions,
   requireQuestionInEvent,
 } from "./lib/data";
+import {
+  backgroundPresetValidator,
+  presetForPosition,
+} from "./lib/backgrounds";
 import { appError } from "./lib/errors";
 import { MAX_CHOICES_PER_QUESTION_SCAN } from "./lib/results";
 
@@ -111,13 +115,15 @@ export const create = mutation({
     const activeQuestions = await loadActiveQuestions(ctx, event._id);
     assertQuestionLimit(activeQuestions.length);
 
+    const position = activeQuestions.length;
     const questionId = await ctx.db.insert("questions", {
       eventId: event._id,
-      position: activeQuestions.length,
+      position,
       prompt: fields.prompt,
       minSelections: fields.minSelections,
       maxSelections: fields.maxSelections,
       countdownSeconds: fields.countdownSeconds,
+      backgroundPreset: presetForPosition(position),
       responseGeneration: 0,
     });
 
@@ -363,6 +369,8 @@ const questionDetailValidator = v.object({
   position: v.number(),
   prompt: v.string(),
   imageUrl: v.union(v.string(), v.null()),
+  backgroundPreset: v.union(backgroundPresetValidator, v.null()),
+  backgroundImageUrl: v.union(v.string(), v.null()),
   minSelections: v.number(),
   maxSelections: v.number(),
   countdownSeconds: v.optional(v.number()),
@@ -417,25 +425,29 @@ export const getHostDetail = query({
       )
       .take(MAX_CHOICES_PER_QUESTION_SCAN);
 
-    const [questionImageUrl, choiceDetails] = await Promise.all([
-      question.imageId === undefined
-        ? Promise.resolve(null)
-        : ctx.storage.getUrl(question.imageId),
-      Promise.all(
-        choices.map(async (choice) => ({
-          _id: choice._id,
-          _creationTime: choice._creationTime,
-          questionId: choice.questionId,
-          position: choice.position,
-          label: choice.label,
-          imageUrl:
-            choice.imageId === undefined
-              ? null
-              : await ctx.storage.getUrl(choice.imageId),
-          archived: choice.archivedAt !== undefined,
-        })),
-      ),
-    ]);
+    const [questionImageUrl, backgroundImageUrl, choiceDetails] =
+      await Promise.all([
+        question.imageId === undefined
+          ? Promise.resolve(null)
+          : ctx.storage.getUrl(question.imageId),
+        question.backgroundImageId === undefined
+          ? Promise.resolve(null)
+          : ctx.storage.getUrl(question.backgroundImageId),
+        Promise.all(
+          choices.map(async (choice) => ({
+            _id: choice._id,
+            _creationTime: choice._creationTime,
+            questionId: choice.questionId,
+            position: choice.position,
+            label: choice.label,
+            imageUrl:
+              choice.imageId === undefined
+                ? null
+                : await ctx.storage.getUrl(choice.imageId),
+            archived: choice.archivedAt !== undefined,
+          })),
+        ),
+      ]);
 
     return {
       question: {
@@ -445,6 +457,8 @@ export const getHostDetail = query({
         position: question.position,
         prompt: question.prompt,
         imageUrl: questionImageUrl,
+        backgroundPreset: question.backgroundPreset ?? null,
+        backgroundImageUrl,
         minSelections: question.minSelections,
         maxSelections: question.maxSelections,
         countdownSeconds: question.countdownSeconds,
