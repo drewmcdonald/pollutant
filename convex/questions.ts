@@ -17,6 +17,7 @@ import {
   backgroundPresetValidator,
   presetForPosition,
 } from "./lib/backgrounds";
+import { questionImageIds } from "./lib/questionImages";
 import { appError } from "./lib/errors";
 import { MAX_CHOICES_PER_QUESTION_SCAN } from "./lib/results";
 
@@ -393,6 +394,7 @@ const questionDetailValidator = v.object({
   prompt: v.string(),
   description: v.union(v.string(), v.null()),
   imageUrl: v.union(v.string(), v.null()),
+  imageUrls: v.array(v.string()),
   backgroundPreset: v.union(backgroundPresetValidator, v.null()),
   backgroundImageUrl: v.union(v.string(), v.null()),
   minSelections: v.number(),
@@ -449,11 +451,13 @@ export const getHostDetail = query({
       )
       .take(MAX_CHOICES_PER_QUESTION_SCAN);
 
-    const [questionImageUrl, backgroundImageUrl, choiceDetails] =
+    const [questionImageUrls, backgroundImageUrl, choiceDetails] =
       await Promise.all([
-        question.imageId === undefined
-          ? Promise.resolve(null)
-          : ctx.storage.getUrl(question.imageId),
+        Promise.all(
+          questionImageIds(question).map((imageId) =>
+            ctx.storage.getUrl(imageId),
+          ),
+        ),
         question.backgroundImageId === undefined
           ? Promise.resolve(null)
           : ctx.storage.getUrl(question.backgroundImageId),
@@ -481,7 +485,10 @@ export const getHostDetail = query({
         position: question.position,
         prompt: question.prompt,
         description: question.description ?? null,
-        imageUrl: questionImageUrl,
+        imageUrl: questionImageUrls.find((url) => url !== null) ?? null,
+        imageUrls: questionImageUrls.filter(
+          (url): url is string => url !== null,
+        ),
         backgroundPreset: question.backgroundPreset ?? null,
         backgroundImageUrl,
         minSelections: question.minSelections,

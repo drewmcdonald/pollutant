@@ -13,6 +13,11 @@ import {
 } from "./lib/backgrounds";
 import { requireChoiceInEvent, requireQuestionInEvent } from "./lib/data";
 import { appError } from "./lib/errors";
+import {
+  MAX_QUESTION_IMAGES,
+  questionImageSlotId,
+  questionImageSlotPatch,
+} from "./lib/questionImages";
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
@@ -74,7 +79,9 @@ export const setQuestionImage = mutation({
     publicSlug: v.string(),
     hostSecret: v.string(),
     questionId: v.id("questions"),
-    storageId: v.union(v.id("_storage"), v.null()),
+    storageId: v.optional(v.union(v.id("_storage"), v.null())),
+    storageId2: v.optional(v.union(v.id("_storage"), v.null())),
+    storageId3: v.optional(v.union(v.id("_storage"), v.null())),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -85,13 +92,31 @@ export const setQuestionImage = mutation({
       event._id,
     );
 
-    const nextImageId = args.storageId ?? undefined;
-    if (nextImageId !== undefined) {
-      await requireValidImage(ctx, nextImageId);
+    const nextIds = [args.storageId, args.storageId2, args.storageId3];
+    if (nextIds.every((id) => id === undefined)) {
+      return null;
+    }
+    if (nextIds.length > MAX_QUESTION_IMAGES) {
+      throw appError(
+        "INVALID_IMAGE",
+        `A question can have at most ${MAX_QUESTION_IMAGES} images.`,
+      );
     }
 
-    await ctx.db.patch(question._id, { imageId: nextImageId });
-    await scheduleCleanupIfChanged(ctx, question.imageId, nextImageId);
+    for (let slot = 0; slot < MAX_QUESTION_IMAGES; slot++) {
+      const next = nextIds[slot];
+      if (next === undefined) continue;
+      const nextImageId = next ?? undefined;
+      if (nextImageId !== undefined) {
+        await requireValidImage(ctx, nextImageId);
+      }
+      const previousImageId = questionImageSlotId(question, slot as 0 | 1 | 2);
+      await ctx.db.patch(
+        question._id,
+        questionImageSlotPatch(slot as 0 | 1 | 2, nextImageId),
+      );
+      await scheduleCleanupIfChanged(ctx, previousImageId, nextImageId);
+    }
 
     return null;
   },
@@ -190,6 +215,20 @@ export const deleteIfUnreferenced = internalMutation({
       .withIndex("by_image_id", (q) => q.eq("imageId", args.storageId))
       .first();
     if (referencingQuestion !== null) {
+      return null;
+    }
+    const referencingQuestion2 = await ctx.db
+      .query("questions")
+      .withIndex("by_image_id_2", (q) => q.eq("imageId2", args.storageId))
+      .first();
+    if (referencingQuestion2 !== null) {
+      return null;
+    }
+    const referencingQuestion3 = await ctx.db
+      .query("questions")
+      .withIndex("by_image_id_3", (q) => q.eq("imageId3", args.storageId))
+      .first();
+    if (referencingQuestion3 !== null) {
       return null;
     }
 

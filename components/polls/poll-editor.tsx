@@ -27,6 +27,7 @@ export type PollDraft = DraftImage & {
   backgroundPreset?: BackgroundPreset;
   backgroundImageFile?: File | null;
   backgroundImageUrl?: string | null;
+  questionImages?: DraftImage[];
   position?: number;
 };
 
@@ -78,8 +79,12 @@ export function PollEditor({
     initial?.countdownSeconds?.toString() ?? "",
   );
   const [error, setError] = useState<string | null>(null);
-  const [questionImage, setQuestionImage] = useState<DraftImage>({
-    imageUrl: initial?.imageUrl,
+  const [questionImages, setQuestionImages] = useState<DraftImage[]>(() => {
+    const fromDraft = initial?.questionImages;
+    const fallback = initial?.imageUrl ? [initial.imageUrl] : [];
+    return [0, 1, 2].map((index) => ({
+      imageUrl: fromDraft?.[index]?.imageUrl ?? fallback[index] ?? null,
+    }));
   });
   const [backgroundPreset, setBackgroundPreset] = useState<BackgroundPreset>(
     initial?.backgroundPreset ??
@@ -108,11 +113,29 @@ export function PollEditor({
     const imageUrl = file ? URL.createObjectURL(file) : null;
     if (imageUrl) previewUrls.current.add(imageUrl);
     const image = { imageFile: file, imageUrl };
-    if (key === undefined) setQuestionImage(image);
-    else
+    if (key !== undefined) {
       setChoices((rows) =>
         rows.map((row) => (row.key === key ? { ...row, ...image } : row)),
       );
+    }
+  }
+
+  function chooseQuestionImage(file: File | null, slot: number) {
+    setError(null);
+    if (file) {
+      const invalid = validateImageFile(file);
+      if (invalid) {
+        setError(invalid);
+        return;
+      }
+    }
+    const imageUrl = file ? URL.createObjectURL(file) : null;
+    if (imageUrl) previewUrls.current.add(imageUrl);
+    setQuestionImages((rows) =>
+      rows.map((row, index) =>
+        index === slot ? { imageFile: file, imageUrl } : row,
+      ),
+    );
   }
 
   function chooseBackground(file: File | null) {
@@ -172,9 +195,9 @@ export function PollEditor({
     const draft: PollDraft = {
       prompt,
       description: description.trim(),
-      ...(questionImage.imageFile !== undefined
-        ? { imageFile: questionImage.imageFile }
-        : {}),
+      questionImages: questionImages.map(({ imageFile }) => ({
+        ...(imageFile !== undefined ? { imageFile } : {}),
+      })),
       choices: choices.map(({ id, label, imageFile }) => ({
         ...(id ? { id } : {}),
         label,
@@ -234,6 +257,38 @@ export function PollEditor({
             onChange={(event) => setPrompt(event.target.value)}
             className="min-h-24 text-base"
           />
+        </div>
+        <div className="space-y-2">
+          <div className="space-y-1">
+            <Label>Question images</Label>
+            <p className="text-xs text-muted-foreground">
+              Up to three. Shown large on phones and the present screen so
+              screenshots stay readable.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {questionImages.map((image, index) => (
+              <div key={index} className="space-y-2">
+                {image.imageUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element -- Local object URL or Convex storage URL.
+                  <img
+                    src={image.imageUrl}
+                    alt=""
+                    className="h-40 w-full rounded-md border bg-muted object-contain"
+                  />
+                )}
+                <ImageControl
+                  imageUrl={image.imageUrl ?? null}
+                  label={`Question image ${index + 1}`}
+                  uploading={false}
+                  progress={undefined}
+                  disabled={busy}
+                  onUpload={(file) => chooseQuestionImage(file, index)}
+                  onRemove={() => chooseQuestionImage(null, index)}
+                />
+              </div>
+            ))}
+          </div>
         </div>
         <div className="space-y-2">
           <Label htmlFor="poll-description">Description</Label>
@@ -482,18 +537,6 @@ export function PollEditor({
                 ))}
               </div>
             </details>
-            <div className="space-y-2">
-              <Label>Question image</Label>
-              <ImageControl
-                imageUrl={questionImage.imageUrl ?? null}
-                label="Question image"
-                uploading={false}
-                progress={undefined}
-                disabled={busy}
-                onUpload={(file) => chooseImage(file)}
-                onRemove={() => chooseImage(null)}
-              />
-            </div>
           </div>
         </details>
         {error && (

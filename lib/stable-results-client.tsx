@@ -9,6 +9,10 @@ import { ArrowLeft, Crown } from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { PageContainer } from "@/components/polls/page-container";
+import {
+  QuestionImages,
+  questionImageUrls,
+} from "@/components/polls/question-images";
 import { ResultsBar } from "@/components/polls/results-bar";
 import { VotingStatusBadge } from "@/components/polls/status-badge";
 import { Button } from "@/components/ui/button";
@@ -147,14 +151,11 @@ function StableResults({ publicSlug, hostSecret, questionId }: Props) {
       </Button>
 
       <Card>
-        {results.imageUrl !== null && (
-          // eslint-disable-next-line @next/next/no-img-element -- Convex storage URL: host is per-deployment/dynamic, so next/image can't safely whitelist it via remotePatterns.
-          <img
-            src={results.imageUrl}
-            alt=""
-            className="aspect-[16/9] w-full rounded-t-xl border-b object-cover"
-          />
-        )}
+        <QuestionImages
+          urls={questionImageUrls(results.imageUrls, results.imageUrl)}
+          alt=""
+          size="host"
+        />
         <CardHeader>
           <div className="flex items-center gap-2">
             <VotingStatusBadge state={results.votingState} />

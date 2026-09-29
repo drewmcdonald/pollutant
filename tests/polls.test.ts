@@ -367,6 +367,37 @@ describe("saving poll images", () => {
     ).toBe(nextImageId);
   });
 
+  test("a question can keep three images and still drop the first one", async () => {
+    const { t, host, saved } = await setup();
+    const first = await storeFile(t, "image/png", "one");
+    const second = await storeFile(t, "image/png", "two");
+    const third = await storeFile(t, "image/png", "three");
+    await t.mutation(api.polls.save, {
+      ...saved,
+      imageId: first,
+      imageId2: second,
+      imageId3: third,
+    });
+    const detail = await t.query(api.questions.getHostDetail, {
+      ...host,
+      questionId: saved.questionId,
+    });
+    expect(detail.question.imageUrls).toHaveLength(3);
+    const deck = await t.query(api.presentation.getDeck, host);
+    expect(deck.currentQuestionResults?.imageUrls).toHaveLength(3);
+
+    await t.mutation(api.polls.save, {
+      ...saved,
+      imageId: null,
+    });
+    const afterRemove = await t.query(api.questions.getHostDetail, {
+      ...host,
+      questionId: saved.questionId,
+    });
+    expect(afterRemove.question.imageUrls).toHaveLength(2);
+    expect(afterRemove.question.imageUrl).toBe(detail.question.imageUrls[1]);
+  });
+
   test("a question description is saved with the draft and can be cleared", async () => {
     const { t, host, saved } = await setup();
     await t.mutation(api.polls.save, {

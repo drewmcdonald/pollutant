@@ -17,6 +17,10 @@ import { Check, CheckCircle2, Radio, Sparkles } from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import { Countdown } from "@/components/polls/countdown";
 import { PageContainer } from "@/components/polls/page-container";
+import {
+  QuestionImages,
+  questionImageUrls,
+} from "@/components/polls/question-images";
 import { ResultsBar } from "@/components/polls/results-bar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -171,15 +175,8 @@ function AudienceQuestion({
   const [audienceError, setAudienceError] = useState<AudienceError | null>(
     null,
   );
-  const [questionImageSize, setQuestionImageSize] = useState<{
-    url: string;
-    width: number;
-  } | null>(null);
-  const hasQuestionImage = question.imageUrl !== null;
-  const questionImageWidth =
-    questionImageSize?.url === question.imageUrl
-      ? questionImageSize.width
-      : null;
+  const imageUrls = questionImageUrls(question.imageUrls, question.imageUrl);
+  const hasQuestionImage = imageUrls.length > 0;
 
   const selectedChoiceIds =
     draft.questionKey === questionKey ? draft.selectedChoiceIds : [];
@@ -272,22 +269,10 @@ function AudienceQuestion({
       narrow={!hasQuestionImage}
       className={cn(
         "min-h-dvh py-6 sm:py-10",
-        hasQuestionImage && "max-w-full",
+        hasQuestionImage && "max-w-4xl",
       )}
     >
-      <div
-        className={cn(
-          "mx-auto w-full",
-          hasQuestionImage && questionImageWidth === null && "max-w-md",
-        )}
-        style={
-          hasQuestionImage && questionImageWidth !== null
-            ? {
-                width: `min(100%, max(28rem, ${questionImageWidth}px))`,
-              }
-            : undefined
-        }
-      >
+      <div className="mx-auto w-full">
         <div className="mb-5 flex items-center justify-between gap-4">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
             Live poll
@@ -304,21 +289,6 @@ function AudienceQuestion({
         </div>
 
         <Card className="overflow-hidden shadow-sm">
-          {question.imageUrl !== null && (
-            // eslint-disable-next-line @next/next/no-img-element -- Convex storage URL: host is per-deployment/dynamic, so next/image can't safely whitelist it via remotePatterns.
-            <img
-              src={question.imageUrl}
-              alt={`Illustration for ${question.prompt}`}
-              className="block h-auto w-full border-b"
-              onLoad={(event) => {
-                if (question.imageUrl === null) return;
-                setQuestionImageSize({
-                  url: question.imageUrl,
-                  width: event.currentTarget.naturalWidth,
-                });
-              }}
-            />
-          )}
           <CardHeader className="gap-3 pb-4">
             <h1 className="text-balance text-center text-xl font-semibold leading-snug sm:text-2xl">
               {question.prompt}
@@ -344,6 +314,10 @@ function AudienceQuestion({
               </div>
             )}
           </CardHeader>
+          <QuestionImages
+            urls={imageUrls}
+            alt={`Illustration for ${question.prompt}`}
+          />
 
           <CardContent>
             {submitted || closed ? (

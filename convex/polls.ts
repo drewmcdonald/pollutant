@@ -15,6 +15,8 @@ import { appError } from "./lib/errors";
 const imageId = v.optional(v.union(v.id("_storage"), v.null()));
 const pollValidator = v.object({
   imageId,
+  imageId2: imageId,
+  imageId3: imageId,
   prompt: v.string(),
   description: v.optional(v.string()),
   choices: v.array(
@@ -140,11 +142,17 @@ async function saveQuestion(
       });
     }
   }
-  if (poll.imageId !== undefined) {
+  if (
+    poll.imageId !== undefined ||
+    poll.imageId2 !== undefined ||
+    poll.imageId3 !== undefined
+  ) {
     await ctx.runMutation(api.images.setQuestionImage, {
       ...host,
       questionId,
-      storageId: poll.imageId,
+      ...(poll.imageId !== undefined ? { storageId: poll.imageId } : {}),
+      ...(poll.imageId2 !== undefined ? { storageId2: poll.imageId2 } : {}),
+      ...(poll.imageId3 !== undefined ? { storageId3: poll.imageId3 } : {}),
     });
   }
   if (
