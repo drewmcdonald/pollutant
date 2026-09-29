@@ -21,6 +21,7 @@ import { appError } from "./lib/errors";
 import { MAX_CHOICES_PER_QUESTION_SCAN } from "./lib/results";
 
 const MAX_PROMPT_LENGTH = 500;
+const MAX_DESCRIPTION_LENGTH = 200;
 const MIN_SELECTIONS = 1;
 const MAX_SELECTIONS = 20;
 const MIN_COUNTDOWN_SECONDS = 5;
@@ -31,6 +32,7 @@ const RESPONSE_CLEANUP_BATCH_SIZE = 50;
 
 type SelectionBounds = {
   prompt: string;
+  description: string | undefined;
   minSelections: number;
   maxSelections: number;
   countdownSeconds: number | undefined;
@@ -48,6 +50,16 @@ function validateQuestionFields(fields: SelectionBounds): SelectionBounds {
     throw appError(
       "VALIDATION_ERROR",
       `Prompt must be at most ${MAX_PROMPT_LENGTH} characters.`,
+    );
+  }
+  const description = fields.description?.trim() || undefined;
+  if (
+    description !== undefined &&
+    description.length > MAX_DESCRIPTION_LENGTH
+  ) {
+    throw appError(
+      "VALIDATION_ERROR",
+      `Description must be at most ${MAX_DESCRIPTION_LENGTH} characters.`,
     );
   }
 
@@ -86,6 +98,7 @@ function validateQuestionFields(fields: SelectionBounds): SelectionBounds {
 
   return {
     prompt,
+    description,
     minSelections: fields.minSelections,
     maxSelections: fields.maxSelections,
     countdownSeconds: fields.countdownSeconds,
@@ -97,6 +110,7 @@ export const create = mutation({
     publicSlug: v.string(),
     hostSecret: v.string(),
     prompt: v.string(),
+    description: v.optional(v.string()),
     minSelections: v.number(),
     maxSelections: v.number(),
     countdownSeconds: v.optional(v.number()),
@@ -107,6 +121,7 @@ export const create = mutation({
 
     const fields = validateQuestionFields({
       prompt: args.prompt,
+      description: args.description,
       minSelections: args.minSelections,
       maxSelections: args.maxSelections,
       countdownSeconds: args.countdownSeconds,
@@ -120,6 +135,9 @@ export const create = mutation({
       eventId: event._id,
       position,
       prompt: fields.prompt,
+      ...(fields.description !== undefined
+        ? { description: fields.description }
+        : {}),
       minSelections: fields.minSelections,
       maxSelections: fields.maxSelections,
       countdownSeconds: fields.countdownSeconds,
@@ -137,6 +155,7 @@ export const update = mutation({
     hostSecret: v.string(),
     questionId: v.id("questions"),
     prompt: v.optional(v.string()),
+    description: v.optional(v.union(v.string(), v.null())),
     minSelections: v.optional(v.number()),
     maxSelections: v.optional(v.number()),
     countdownSeconds: v.optional(v.union(v.number(), v.null())),
@@ -152,6 +171,10 @@ export const update = mutation({
 
     const fields = validateQuestionFields({
       prompt: args.prompt ?? question.prompt,
+      description:
+        args.description === null
+          ? undefined
+          : (args.description ?? question.description),
       minSelections: args.minSelections ?? question.minSelections,
       maxSelections: args.maxSelections ?? question.maxSelections,
       countdownSeconds:
@@ -368,6 +391,7 @@ const questionDetailValidator = v.object({
   eventId: v.id("events"),
   position: v.number(),
   prompt: v.string(),
+  description: v.union(v.string(), v.null()),
   imageUrl: v.union(v.string(), v.null()),
   backgroundPreset: v.union(backgroundPresetValidator, v.null()),
   backgroundImageUrl: v.union(v.string(), v.null()),
@@ -456,6 +480,7 @@ export const getHostDetail = query({
         eventId: question.eventId,
         position: question.position,
         prompt: question.prompt,
+        description: question.description ?? null,
         imageUrl: questionImageUrl,
         backgroundPreset: question.backgroundPreset ?? null,
         backgroundImageUrl,

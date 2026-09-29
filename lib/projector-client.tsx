@@ -276,6 +276,11 @@ function QuestionSlide({
       <h1 className="max-w-4xl text-balance text-center text-5xl font-semibold leading-tight text-white drop-shadow-[0_2px_16px_rgba(0,0,0,0.85)]">
         {question.prompt}
       </h1>
+      {question.description && (
+        <p className="-mt-4 max-w-3xl text-balance text-center text-2xl text-white/80 drop-shadow-[0_2px_12px_rgba(0,0,0,0.85)]">
+          {question.description}
+        </p>
+      )}
 
       {revealed && (
         <p className="text-sm font-semibold uppercase tracking-[0.28em] text-amber-200">
@@ -392,7 +397,12 @@ function FinaleQuestionCard({ question }: { question: QuestionResults }) {
         />
       )}
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <h2 className="text-xl font-semibold">{question.prompt}</h2>
+        <div className="min-w-0">
+          <h2 className="text-xl font-semibold">{question.prompt}</h2>
+          {question.description && (
+            <p className="mt-1 text-sm text-white/70">{question.description}</p>
+          )}
+        </div>
         {winners.length > 0 && (
           <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300/40 bg-amber-300/10 px-2.5 py-1 text-xs font-medium text-amber-300">
             <Crown className="h-3.5 w-3.5" />

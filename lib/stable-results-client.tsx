@@ -162,6 +162,11 @@ function StableResults({ publicSlug, hostSecret, questionId }: Props) {
           <CardTitle className="text-xl leading-snug">
             {results.prompt}
           </CardTitle>
+          {results.description && (
+            <p className="text-sm text-muted-foreground">
+              {results.description}
+            </p>
+          )}
           <CardDescription>
             {results.ballotCount} ballot{results.ballotCount === 1 ? "" : "s"}{" "}
             submitted

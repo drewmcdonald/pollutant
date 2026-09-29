@@ -16,6 +16,7 @@ const imageId = v.optional(v.union(v.id("_storage"), v.null()));
 const pollValidator = v.object({
   imageId,
   prompt: v.string(),
+  description: v.optional(v.string()),
   choices: v.array(
     v.object({ id: v.optional(v.id("choices")), label: v.string(), imageId }),
   ),
@@ -47,6 +48,9 @@ async function saveQuestion(
   const event = await requireHost(ctx, host.publicSlug, host.hostSecret);
   const questionFields = {
     prompt: poll.prompt,
+    ...(poll.description !== undefined
+      ? { description: poll.description }
+      : {}),
     minSelections: poll.minSelections,
     maxSelections: poll.maxSelections,
     countdownSeconds: poll.countdownSeconds,

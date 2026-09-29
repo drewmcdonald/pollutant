@@ -64,6 +64,7 @@ export function usePollImages() {
       draft.backgroundPreset;
     return {
       prompt: draft.prompt,
+      description: draft.description ?? "",
       minSelections: draft.minSelections,
       maxSelections: draft.maxSelections,
       ...(draft.countdownSeconds !== undefined

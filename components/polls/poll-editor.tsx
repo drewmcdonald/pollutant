@@ -19,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 type DraftImage = { imageFile?: File | null; imageUrl?: string | null };
 export type PollDraft = DraftImage & {
   prompt: string;
+  description?: string;
   choices: ({ id?: Id<"choices">; label: string } & DraftImage)[];
   minSelections: number;
   maxSelections: number;
@@ -58,6 +59,7 @@ export function PollEditor({
   position = 0,
 }: Props) {
   const [prompt, setPrompt] = useState(initial?.prompt ?? "");
+  const [description, setDescription] = useState(initial?.description ?? "");
   const inputRefs = useRef(new Map<number, HTMLInputElement>());
   const nextKey = useRef(initial?.choices.length || 2);
   const [choices, setChoices] = useState(() =>
@@ -169,6 +171,7 @@ export function PollEditor({
     }
     const draft: PollDraft = {
       prompt,
+      description: description.trim(),
       ...(questionImage.imageFile !== undefined
         ? { imageFile: questionImage.imageFile }
         : {}),
@@ -230,6 +233,16 @@ export function PollEditor({
             maxLength={500}
             onChange={(event) => setPrompt(event.target.value)}
             className="min-h-24 text-base"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="poll-description">Description</Label>
+          <Input
+            id="poll-description"
+            placeholder="Optional context shown under the question"
+            value={description}
+            maxLength={200}
+            onChange={(event) => setDescription(event.target.value)}
           />
         </div>
         <div className="space-y-3">
