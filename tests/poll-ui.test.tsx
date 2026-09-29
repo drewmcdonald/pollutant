@@ -67,6 +67,7 @@ describe("poll setup", () => {
     expect(save).toHaveBeenCalledWith(
       {
         prompt: "Lunch?",
+        description: "",
         choices: [{ label: "Pizza" }, { label: "Tacos" }],
         minSelections: 1,
         maxSelections: 1,
@@ -84,6 +85,25 @@ describe("poll setup", () => {
     await user.click(screen.getByRole("button", { name: "Save draft" }));
     expect(save).toHaveBeenCalledWith(
       expect.objectContaining({ backgroundPreset: "liquid-violet" }),
+      false,
+    );
+  });
+
+  test("the host can add a short description under the question", async () => {
+    const user = userEvent.setup();
+    const save = vi.fn().mockResolvedValue(undefined);
+    render(<PollEditor busy={false} onSave={save} />);
+    await user.type(screen.getByLabelText("Your question"), "Lunch?");
+    await user.type(
+      screen.getByLabelText("Description"),
+      "Pick what we order first",
+    );
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: "Lunch?",
+        description: "Pick what we order first",
+      }),
       false,
     );
   });
@@ -152,7 +172,7 @@ describe("poll setup", () => {
     await user.type(screen.getByLabelText("Your question"), "Lunch?");
     await user.click(screen.getByLabelText("Option 1"));
     await user.paste("Pizza\nTacos\nSalad");
-    expect(screen.getAllByRole("textbox")).toHaveLength(4);
+    expect(screen.getAllByRole("textbox")).toHaveLength(5);
     await user.click(screen.getByRole("button", { name: "Start poll" }));
     expect(save).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -383,6 +403,26 @@ describe("audience voting", () => {
       expect.objectContaining({ selectedChoiceIds: ["choice-2"] }),
     );
     expect(screen.getByText("Your vote is in")).toBeTruthy();
+  });
+
+  test("a question image widens the voter card to the picture", () => {
+    mocks.query.mockReturnValue({
+      ...audienceState,
+      question: {
+        ...audienceState.question,
+        imageUrl: "https://example.com/wide.png",
+      },
+    });
+    render(<AudienceClient publicSlug="test-poll" />);
+    const image = screen.getByRole("img", {
+      name: "Illustration for Lunch?",
+    });
+    expect(image.className).not.toContain("object-cover");
+    Object.defineProperty(image, "naturalWidth", { value: 960 });
+    fireEvent.load(image);
+    expect(image.parentElement?.parentElement?.getAttribute("style")).toContain(
+      "960px",
+    );
   });
 
   test("closed polls show final results without a vote form", () => {

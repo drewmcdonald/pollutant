@@ -367,6 +367,36 @@ describe("saving poll images", () => {
     ).toBe(nextImageId);
   });
 
+  test("a question description is saved with the draft and can be cleared", async () => {
+    const { t, host, saved } = await setup();
+    await t.mutation(api.polls.save, {
+      ...saved,
+      description: "Pick one topic for the next hour",
+    });
+    const withCopy = await t.query(api.questions.getHostDetail, {
+      ...host,
+      questionId: saved.questionId,
+    });
+    expect(withCopy.question.description).toBe(
+      "Pick one topic for the next hour",
+    );
+    const audience = await t.query(api.audience.getCurrentState, {
+      publicSlug: host.publicSlug,
+    });
+    expect(audience.kind).toBe("question");
+    if (audience.kind !== "question") throw new Error("Expected question");
+    expect(audience.question.description).toBe(
+      "Pick one topic for the next hour",
+    );
+
+    await t.mutation(api.polls.save, { ...saved, description: "" });
+    const cleared = await t.query(api.questions.getHostDetail, {
+      ...host,
+      questionId: saved.questionId,
+    });
+    expect(cleared.question.description).toBeNull();
+  });
+
   test("each question starts on its own projector background and the host can replace it", async () => {
     const { t, host, saved } = await setup();
     const first = await t.query(api.questions.getHostDetail, {

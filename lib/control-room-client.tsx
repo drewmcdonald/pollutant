@@ -469,9 +469,16 @@ function ControlRoom({
                         />
                       )}
                   </div>
-                  <h2 className="break-words text-2xl font-semibold">
-                    {selected.prompt || "Untitled question"}
-                  </h2>
+                  <div className="space-y-2">
+                    <h2 className="break-words text-2xl font-semibold">
+                      {selected.prompt || "Untitled question"}
+                    </h2>
+                    {selected.description && (
+                      <p className="text-base text-muted-foreground">
+                        {selected.description}
+                      </p>
+                    )}
+                  </div>
                   {results?.imageUrl && (
                     // eslint-disable-next-line @next/next/no-img-element -- Convex storage URLs are deployment-specific.
                     <img
@@ -752,6 +759,7 @@ function ExistingQuestionForm({
     <PollEditor
       initial={{
         prompt: original.question.prompt,
+        description: original.question.description ?? "",
         imageUrl: original.question.imageUrl,
         backgroundPreset: original.question.backgroundPreset ?? undefined,
         backgroundImageUrl: original.question.backgroundImageUrl,

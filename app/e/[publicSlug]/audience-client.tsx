@@ -171,6 +171,15 @@ function AudienceQuestion({
   const [audienceError, setAudienceError] = useState<AudienceError | null>(
     null,
   );
+  const [questionImageSize, setQuestionImageSize] = useState<{
+    url: string;
+    width: number;
+  } | null>(null);
+  const hasQuestionImage = question.imageUrl !== null;
+  const questionImageWidth =
+    questionImageSize?.url === question.imageUrl
+      ? questionImageSize.width
+      : null;
 
   const selectedChoiceIds =
     draft.questionKey === questionKey ? draft.selectedChoiceIds : [];
@@ -259,171 +268,203 @@ function AudienceQuestion({
   }
 
   return (
-    <PageContainer narrow className="min-h-dvh py-6 sm:py-10">
-      <div className="mb-5 flex items-center justify-between gap-4">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-          Live poll
-        </p>
-        {!submitted &&
-          !closed &&
-          question.countdownSeconds !== undefined &&
-          question.votingOpenedAt !== undefined && (
-            <Countdown
-              countdownSeconds={question.countdownSeconds}
-              openedAt={question.votingOpenedAt}
+    <PageContainer
+      narrow={!hasQuestionImage}
+      className={cn(
+        "min-h-dvh py-6 sm:py-10",
+        hasQuestionImage && "max-w-full",
+      )}
+    >
+      <div
+        className={cn(
+          "mx-auto w-full",
+          hasQuestionImage && questionImageWidth === null && "max-w-md",
+        )}
+        style={
+          hasQuestionImage && questionImageWidth !== null
+            ? {
+                width: `min(100%, max(28rem, ${questionImageWidth}px))`,
+              }
+            : undefined
+        }
+      >
+        <div className="mb-5 flex items-center justify-between gap-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+            Live poll
+          </p>
+          {!submitted &&
+            !closed &&
+            question.countdownSeconds !== undefined &&
+            question.votingOpenedAt !== undefined && (
+              <Countdown
+                countdownSeconds={question.countdownSeconds}
+                openedAt={question.votingOpenedAt}
+              />
+            )}
+        </div>
+
+        <Card className="overflow-hidden shadow-sm">
+          {question.imageUrl !== null && (
+            // eslint-disable-next-line @next/next/no-img-element -- Convex storage URL: host is per-deployment/dynamic, so next/image can't safely whitelist it via remotePatterns.
+            <img
+              src={question.imageUrl}
+              alt={`Illustration for ${question.prompt}`}
+              className="block h-auto w-full border-b"
+              onLoad={(event) => {
+                if (question.imageUrl === null) return;
+                setQuestionImageSize({
+                  url: question.imageUrl,
+                  width: event.currentTarget.naturalWidth,
+                });
+              }}
             />
           )}
-      </div>
-
-      <Card className="overflow-hidden shadow-sm">
-        {question.imageUrl !== null && (
-          // eslint-disable-next-line @next/next/no-img-element -- Convex storage URL: host is per-deployment/dynamic, so next/image can't safely whitelist it via remotePatterns.
-          <img
-            src={question.imageUrl}
-            alt={`Illustration for ${question.prompt}`}
-            className="aspect-[16/9] w-full border-b object-cover"
-          />
-        )}
-        <CardHeader className="gap-3 pb-4">
-          <h1 className="text-balance text-center text-xl font-semibold leading-snug sm:text-2xl">
-            {question.prompt}
-          </h1>
-          {!submitted && !closed && (
-            <div className="flex items-center justify-center gap-2 text-center text-xs text-muted-foreground">
-              <span>
-                {selectionGuidance(
-                  question.minSelections,
-                  question.maxSelections,
-                )}
-              </span>
-              {question.maxSelections > 1 && (
-                <span className="rounded-full bg-muted px-2 py-0.5 font-medium tabular-nums text-foreground">
-                  {selectedChoiceIds.length}/{question.maxSelections}
+          <CardHeader className="gap-3 pb-4">
+            <h1 className="text-balance text-center text-xl font-semibold leading-snug sm:text-2xl">
+              {question.prompt}
+            </h1>
+            {question.description && (
+              <p className="text-balance text-center text-sm text-muted-foreground">
+                {question.description}
+              </p>
+            )}
+            {!submitted && !closed && (
+              <div className="flex items-center justify-center gap-2 text-center text-xs text-muted-foreground">
+                <span>
+                  {selectionGuidance(
+                    question.minSelections,
+                    question.maxSelections,
+                  )}
                 </span>
-              )}
-            </div>
-          )}
-        </CardHeader>
+                {question.maxSelections > 1 && (
+                  <span className="rounded-full bg-muted px-2 py-0.5 font-medium tabular-nums text-foreground">
+                    {selectedChoiceIds.length}/{question.maxSelections}
+                  </span>
+                )}
+              </div>
+            )}
+          </CardHeader>
 
-        <CardContent>
-          {submitted || closed ? (
-            <div className="flex flex-col gap-6">
-              <div className="flex items-start gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4">
-                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
-                <div>
-                  <p className="font-medium">
-                    {closed ? "Voting has ended" : "Your vote is in"}
+          <CardContent>
+            {submitted || closed ? (
+              <div className="flex flex-col gap-6">
+                <div className="flex items-start gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4">
+                  <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+                  <div>
+                    <p className="font-medium">
+                      {closed ? "Voting has ended" : "Your vote is in"}
+                    </p>
+                    <p className="mt-0.5 text-sm text-muted-foreground">
+                      {closed
+                        ? "Here are the final results."
+                        : "Watch the results update live."}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-4" aria-live="polite">
+                  {question.choices.map((choice) => (
+                    <ResultsBar key={choice.choiceId} choice={choice} />
+                  ))}
+                </div>
+                <div className="text-center text-xs leading-relaxed text-muted-foreground">
+                  <p className="font-medium text-foreground">
+                    {question.ballotCount} vote
+                    {question.ballotCount === 1 ? "" : "s"}
                   </p>
-                  <p className="mt-0.5 text-sm text-muted-foreground">
-                    {closed
-                      ? "Here are the final results."
-                      : "Watch the results update live."}
-                  </p>
+                  {question.maxSelections > 1 && (
+                    <p className="mt-1">
+                      Percentages show the share of respondents selecting each
+                      choice, so they may total more than 100%.
+                    </p>
+                  )}
                 </div>
               </div>
-
-              <div className="space-y-4" aria-live="polite">
-                {question.choices.map((choice) => (
-                  <ResultsBar key={choice.choiceId} choice={choice} />
-                ))}
-              </div>
-              <div className="text-center text-xs leading-relaxed text-muted-foreground">
-                <p className="font-medium text-foreground">
-                  {question.ballotCount} vote
-                  {question.ballotCount === 1 ? "" : "s"}
-                </p>
-                {question.maxSelections > 1 && (
-                  <p className="mt-1">
-                    Percentages show the share of respondents selecting each
-                    choice, so they may total more than 100%.
-                  </p>
-                )}
-              </div>
-            </div>
-          ) : (
-            <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
-              <fieldset className="flex flex-col gap-2">
-                <legend className="sr-only">Answer choices</legend>
-                {question.choices.map((choice) => {
-                  const checked = selectedChoiceIds.includes(choice.choiceId);
-                  const disabled =
-                    submitting ||
-                    (question.maxSelections > 1 && !checked && atMaximum);
-                  return (
-                    <label
-                      key={choice.choiceId}
-                      className={cn(
-                        "group flex cursor-pointer items-center gap-3 rounded-xl border p-3 transition-colors",
-                        checked && "border-primary bg-primary/5 shadow-sm",
-                        disabled && "cursor-not-allowed opacity-50",
-                      )}
-                    >
-                      <input
-                        type={
-                          question.maxSelections === 1 ? "radio" : "checkbox"
-                        }
-                        name="choice"
-                        checked={checked}
-                        disabled={disabled}
-                        onChange={() => toggleChoice(choice.choiceId)}
-                        className="peer sr-only"
-                      />
-                      <span
+            ) : (
+              <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
+                <fieldset className="flex flex-col gap-2">
+                  <legend className="sr-only">Answer choices</legend>
+                  {question.choices.map((choice) => {
+                    const checked = selectedChoiceIds.includes(choice.choiceId);
+                    const disabled =
+                      submitting ||
+                      (question.maxSelections > 1 && !checked && atMaximum);
+                    return (
+                      <label
+                        key={choice.choiceId}
                         className={cn(
-                          "flex h-6 w-6 shrink-0 items-center justify-center border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2",
-                          question.maxSelections === 1
-                            ? "rounded-full"
-                            : "rounded-md",
-                          checked &&
-                            "border-primary bg-primary text-primary-foreground",
+                          "group flex cursor-pointer items-center gap-3 rounded-xl border p-3 transition-colors",
+                          checked && "border-primary bg-primary/5 shadow-sm",
+                          disabled && "cursor-not-allowed opacity-50",
                         )}
                       >
-                        <Check
-                          className={cn("h-4 w-4", !checked && "hidden")}
+                        <input
+                          type={
+                            question.maxSelections === 1 ? "radio" : "checkbox"
+                          }
+                          name="choice"
+                          checked={checked}
+                          disabled={disabled}
+                          onChange={() => toggleChoice(choice.choiceId)}
+                          className="peer sr-only"
                         />
-                      </span>
-                      {choice.imageUrl !== null && (
-                        // eslint-disable-next-line @next/next/no-img-element -- Convex storage URL: host is per-deployment/dynamic, so next/image can't safely whitelist it via remotePatterns.
-                        <img
-                          src={choice.imageUrl}
-                          alt=""
-                          width={64}
-                          height={64}
-                          className="h-14 w-14 shrink-0 rounded-lg border object-cover"
-                        />
-                      )}
-                      <span className="min-w-0 font-medium leading-snug">
-                        {choice.label}
-                      </span>
-                    </label>
-                  );
-                })}
-              </fieldset>
+                        <span
+                          className={cn(
+                            "flex h-6 w-6 shrink-0 items-center justify-center border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2",
+                            question.maxSelections === 1
+                              ? "rounded-full"
+                              : "rounded-md",
+                            checked &&
+                              "border-primary bg-primary text-primary-foreground",
+                          )}
+                        >
+                          <Check
+                            className={cn("h-4 w-4", !checked && "hidden")}
+                          />
+                        </span>
+                        {choice.imageUrl !== null && (
+                          // eslint-disable-next-line @next/next/no-img-element -- Convex storage URL: host is per-deployment/dynamic, so next/image can't safely whitelist it via remotePatterns.
+                          <img
+                            src={choice.imageUrl}
+                            alt=""
+                            width={64}
+                            height={64}
+                            className="h-14 w-14 shrink-0 rounded-lg border object-cover"
+                          />
+                        )}
+                        <span className="min-w-0 font-medium leading-snug">
+                          {choice.label}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </fieldset>
 
-              {visibleError !== null && (
-                <p
-                  role="alert"
-                  className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+                {visibleError !== null && (
+                  <p
+                    role="alert"
+                    className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+                  >
+                    {visibleError}
+                  </p>
+                )}
+
+                <Button
+                  type="submit"
+                  size="lg"
+                  className="mt-1 w-full"
+                  disabled={!validSelectionCount || submitting}
                 >
-                  {visibleError}
+                  {submitting ? "Submitting…" : "Vote"}
+                </Button>
+                <p className="text-center text-[11px] leading-relaxed text-muted-foreground">
+                  Choose carefully — you can vote once.
                 </p>
-              )}
-
-              <Button
-                type="submit"
-                size="lg"
-                className="mt-1 w-full"
-                disabled={!validSelectionCount || submitting}
-              >
-                {submitting ? "Submitting…" : "Vote"}
-              </Button>
-              <p className="text-center text-[11px] leading-relaxed text-muted-foreground">
-                Choose carefully — you can vote once.
-              </p>
-            </form>
-          )}
-        </CardContent>
-      </Card>
+              </form>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </PageContainer>
   );
 }

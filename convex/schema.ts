@@ -24,6 +24,7 @@ export default defineSchema({
     eventId: v.id("events"),
     position: v.number(),
     prompt: v.string(),
+    description: v.optional(v.string()),
     imageId: v.optional(v.id("_storage")),
     backgroundPreset: v.optional(backgroundPresetValidator),
     backgroundImageId: v.optional(v.id("_storage")),
