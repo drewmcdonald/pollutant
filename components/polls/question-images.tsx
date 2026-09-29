@@ -25,7 +25,8 @@ export function QuestionImages({
 }) {
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
   const canCycle = urls.length > 1;
-  const focusedUrl = focusedIndex === null ? null : urls[focusedIndex];
+  const focusedUrl =
+    focusedIndex === null ? undefined : urls[focusedIndex];
 
   const showNext = () => {
     setFocusedIndex((current) =>
@@ -96,7 +97,6 @@ export function QuestionImages({
         ))}
       </div>
       {focusedUrl !== undefined &&
-        focusedIndex !== null &&
         createPortal(
           <div
             role="dialog"
