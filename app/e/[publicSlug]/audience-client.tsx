@@ -267,26 +267,20 @@ function AudienceQuestion({
   return (
     <PageContainer
       narrow={!hasQuestionImage}
-      className={cn(
-        "min-h-dvh py-6 sm:py-10",
-        hasQuestionImage && "max-w-4xl",
-      )}
+      className={cn("min-h-dvh py-6 sm:py-10", hasQuestionImage && "max-w-4xl")}
     >
       <div className="mx-auto w-full">
-        <div className="mb-5 flex items-center justify-between gap-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-            Live poll
-          </p>
-          {!submitted &&
-            !closed &&
-            question.countdownSeconds !== undefined &&
-            question.votingOpenedAt !== undefined && (
+        {!submitted &&
+          !closed &&
+          question.countdownSeconds !== undefined &&
+          question.votingOpenedAt !== undefined && (
+            <div className="mb-5 flex justify-end">
               <Countdown
                 countdownSeconds={question.countdownSeconds}
                 openedAt={question.votingOpenedAt}
               />
-            )}
-        </div>
+            </div>
+          )}
 
         <Card className="overflow-hidden shadow-sm">
           <CardHeader className="gap-3 pb-4">

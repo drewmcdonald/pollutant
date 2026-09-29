@@ -470,6 +470,9 @@ function ControlRoom({
                         <Countdown
                           countdownSeconds={selected.countdownSeconds}
                           openedAt={deck.event.votingOpenedAt}
+                          onExpired={() => {
+                            void close(host).catch(() => {});
+                          }}
                         />
                       )}
                   </div>
