@@ -5,13 +5,16 @@ import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import type { PollDraft } from "@/components/polls/poll-editor";
+import type { BackgroundPreset } from "@/convex/lib/backgrounds";
 import { uploadFileWithProgress } from "@/lib/image-upload";
 
 type Host = { publicSlug: string; hostSecret: string };
 
 export function hasPendingImages(draft: PollDraft) {
   return (
-    !!draft.imageFile || draft.choices.some((choice) => !!choice.imageFile)
+    !!draft.imageFile ||
+    !!draft.backgroundImageFile ||
+    draft.choices.some((choice) => !!choice.imageFile)
   );
 }
 
@@ -23,13 +26,14 @@ export function usePollImages() {
   );
 
   return async (draft: PollDraft, host?: Host) => {
-    async function imageFields(file: File | null | undefined) {
-      if (file === undefined) return {};
-      if (file === null) return { imageId: null };
+    async function storageIdFor(
+      file: File | null | undefined,
+    ): Promise<Id<"_storage"> | null | undefined> {
+      if (file === undefined) return undefined;
+      if (file === null) return null;
       if (!host) throw new Error("A host link is required to upload images.");
       const cached = uploadedFiles.current.get(file);
-      if (cached?.publicSlug === host.publicSlug)
-        return { imageId: cached.storageId };
+      if (cached?.publicSlug === host.publicSlug) return cached.storageId;
       const { uploadUrl } = await generateUploadUrl(host);
       const { storageId } = await uploadFileWithProgress(
         uploadUrl,
@@ -40,7 +44,11 @@ export function usePollImages() {
         publicSlug: host.publicSlug,
         storageId,
       });
-      return { imageId: storageId };
+      return storageId;
+    }
+
+    function imageFields(storageId: Id<"_storage"> | null | undefined) {
+      return storageId === undefined ? {} : { imageId: storageId };
     }
 
     const choices = [];
@@ -48,9 +56,12 @@ export function usePollImages() {
       choices.push({
         ...(choice.id ? { id: choice.id } : {}),
         label: choice.label,
-        ...(await imageFields(choice.imageFile)),
+        ...imageFields(await storageIdFor(choice.imageFile)),
       });
     }
+    const backgroundImageId = await storageIdFor(draft.backgroundImageFile);
+    const backgroundPreset: BackgroundPreset | undefined =
+      draft.backgroundPreset;
     return {
       prompt: draft.prompt,
       minSelections: draft.minSelections,
@@ -58,7 +69,9 @@ export function usePollImages() {
       ...(draft.countdownSeconds !== undefined
         ? { countdownSeconds: draft.countdownSeconds }
         : {}),
-      ...(await imageFields(draft.imageFile)),
+      ...(backgroundPreset !== undefined ? { backgroundPreset } : {}),
+      ...(backgroundImageId !== undefined ? { backgroundImageId } : {}),
+      ...imageFields(await storageIdFor(draft.imageFile)),
       choices,
     };
   };

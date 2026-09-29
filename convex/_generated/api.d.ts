@@ -14,6 +14,7 @@ import type * as choices from "../choices.js";
 import type * as events from "../events.js";
 import type * as images from "../images.js";
 import type * as lib_auth from "../lib/auth.js";
+import type * as lib_backgrounds from "../lib/backgrounds.js";
 import type * as lib_counters from "../lib/counters.js";
 import type * as lib_data from "../lib/data.js";
 import type * as lib_errors from "../lib/errors.js";
@@ -36,6 +37,7 @@ declare const fullApi: ApiFromModules<{
   events: typeof events;
   images: typeof images;
   "lib/auth": typeof lib_auth;
+  "lib/backgrounds": typeof lib_backgrounds;
   "lib/counters": typeof lib_counters;
   "lib/data": typeof lib_data;
   "lib/errors": typeof lib_errors;

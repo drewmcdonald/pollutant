@@ -1,12 +1,20 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { cleanup, render, screen, fireEvent } from "@testing-library/react";
+import {
+  cleanup,
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { PollEditor } from "../components/polls/poll-editor";
 import { AudienceClient } from "../app/e/[publicSlug]/audience-client";
 import { getFunctionName } from "convex/server";
 import { ControlRoomClient } from "../lib/control-room-client";
 import { DashboardClient } from "../lib/dashboard-client";
+import { ProjectorClient } from "../lib/projector-client";
+import { projectorBackgroundSrc } from "../lib/background-presets";
 
 const mocks = vi.hoisted(() => ({
   mutation: vi.fn(),
@@ -18,6 +26,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock("convex/react", () => ({
   useMutation: () => mocks.mutation,
   useQuery: (...args: unknown[]) => mocks.query(...args),
+  usePaginatedQuery: () => ({
+    results: [],
+    status: "Exhausted",
+    loadMore: () => {},
+  }),
 }));
 vi.mock("../lib/image-upload", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/image-upload")>()),
@@ -57,8 +70,43 @@ describe("poll setup", () => {
         choices: [{ label: "Pizza" }, { label: "Tacos" }],
         minSelections: 1,
         maxSelections: 1,
+        backgroundPreset: "rose-glow",
       },
       true,
+    );
+  });
+
+  test("the host can pick a different projector background", async () => {
+    const user = userEvent.setup();
+    const save = vi.fn().mockResolvedValue(undefined);
+    render(<PollEditor busy={false} onSave={save} />);
+    await user.click(screen.getByRole("button", { name: "Liquid violet" }));
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({ backgroundPreset: "liquid-violet" }),
+      false,
+    );
+  });
+
+  test("a custom upload replaces the preset until it is removed", async () => {
+    const user = userEvent.setup();
+    const save = vi.fn().mockResolvedValue(undefined);
+    render(<PollEditor busy={false} onSave={save} />);
+    const input = screen.getByLabelText("Choose custom projector background");
+    const file = new File(["image"], "lava.png", { type: "image/png" });
+    await user.upload(input, file);
+    expect(
+      screen
+        .getByRole("button", { name: "Rose glow" })
+        .getAttribute("aria-pressed"),
+    ).toBe("false");
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        backgroundPreset: "rose-glow",
+        backgroundImageFile: file,
+      }),
+      false,
     );
   });
 
@@ -787,5 +835,101 @@ describe("question tabs while editing", () => {
     expect(
       (screen.getByLabelText("Your question") as HTMLTextAreaElement).value,
     ).toBe("First question");
+  });
+});
+
+describe("projector backgrounds and winner celebration", () => {
+  test("preset and custom background urls resolve for the present screen", () => {
+    expect(projectorBackgroundSrc("rose-glow", 0, null)).toBe(
+      "/backgrounds/rose-glow.jpg",
+    );
+    expect(projectorBackgroundSrc(null, 1, null)).toBe(
+      "/backgrounds/color-wash.jpg",
+    );
+    expect(
+      projectorBackgroundSrc("rose-glow", 0, "https://example.com/custom.jpg"),
+    ).toBe("https://example.com/custom.jpg");
+  });
+
+  test("a closed question shows its background, confetti, and zooms the winner", async () => {
+    const originalGetContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = (() => ({
+      clearRect() {},
+      save() {},
+      restore() {},
+      translate() {},
+      rotate() {},
+      fillRect() {},
+      setTransform() {},
+      get canvas() {
+        return document.createElement("canvas");
+      },
+    })) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+    try {
+      mocks.query.mockImplementation((reference) => {
+        switch (getFunctionName(reference)) {
+          case "presentation:getDeck":
+            return {
+              event: {
+                title: "Lunch?",
+                currentSlide: { kind: "question", questionId: "question-1" },
+              },
+              questions: [{ _id: "question-1" }],
+              currentQuestionResults: {
+                questionId: "question-1",
+                position: 0,
+                prompt: "Lunch?",
+                imageUrl: null,
+                backgroundPreset: "neon-bloom",
+                backgroundImageUrl: null,
+                ballotCount: 3,
+                votingState: "closed",
+                choices: [
+                  {
+                    choiceId: "choice-1",
+                    label: "Pizza",
+                    imageUrl: null,
+                    archived: false,
+                    selections: 2,
+                    respondentPercentage: 66.7,
+                    winner: true,
+                  },
+                  {
+                    choiceId: "choice-2",
+                    label: "Tacos",
+                    imageUrl: null,
+                    archived: false,
+                    selections: 1,
+                    respondentPercentage: 33.3,
+                    winner: false,
+                  },
+                ],
+              },
+            };
+          case "presence:getConnectedCount":
+            return { connectedCount: 4 };
+        }
+      });
+      render(
+        <ProjectorClient publicSlug="test-poll" hostSecret="host-secret" />,
+      );
+      expect(
+        document
+          .querySelector("[data-projector-background]")
+          ?.getAttribute("data-projector-background"),
+      ).toBe("/backgrounds/neon-bloom.jpg");
+      await waitFor(() => {
+        expect(screen.getByText("Winner")).toBeTruthy();
+        expect(document.querySelector("canvas")).toBeTruthy();
+        expect(
+          document.querySelector("[data-winner-focus='true']")?.textContent,
+        ).toContain("Pizza");
+      });
+      expect(
+        document.querySelector("[data-winner-focus='false']")?.className,
+      ).toContain("opacity-0");
+    } finally {
+      HTMLCanvasElement.prototype.getContext = originalGetContext;
+    }
   });
 });

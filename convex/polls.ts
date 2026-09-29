@@ -9,6 +9,7 @@ import {
   loadActiveQuestions,
   requireQuestionInEvent,
 } from "./lib/data";
+import { backgroundPresetValidator } from "./lib/backgrounds";
 import { appError } from "./lib/errors";
 
 const imageId = v.optional(v.union(v.id("_storage"), v.null()));
@@ -21,6 +22,8 @@ const pollValidator = v.object({
   minSelections: v.number(),
   maxSelections: v.number(),
   countdownSeconds: v.optional(v.number()),
+  backgroundPreset: v.optional(backgroundPresetValidator),
+  backgroundImageId: imageId,
   start: v.boolean(),
 });
 const fields = pollValidator.fields;
@@ -138,6 +141,21 @@ async function saveQuestion(
       ...host,
       questionId,
       storageId: poll.imageId,
+    });
+  }
+  if (
+    poll.backgroundPreset !== undefined ||
+    poll.backgroundImageId !== undefined
+  ) {
+    await ctx.runMutation(api.images.setQuestionBackground, {
+      ...host,
+      questionId,
+      ...(poll.backgroundPreset !== undefined
+        ? { preset: poll.backgroundPreset }
+        : {}),
+      ...(poll.backgroundImageId !== undefined
+        ? { storageId: poll.backgroundImageId }
+        : {}),
     });
   }
   await ctx.runMutation(api.choices.reorder, {

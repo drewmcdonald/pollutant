@@ -17,10 +17,12 @@ export function ResultsBar({
   choice,
   isWinner,
   highContrast,
+  prominent = false,
 }: {
   choice: ResultChoice;
   isWinner?: boolean;
   highContrast?: boolean;
+  prominent?: boolean;
 }) {
   const pct = choice.respondentPercentage;
   const winner = isWinner ?? choice.winner ?? false;
@@ -45,6 +47,7 @@ export function ResultsBar({
             className={cn(
               "truncate font-medium",
               highContrast && "text-lg text-white",
+              prominent && "text-3xl font-semibold sm:text-4xl",
             )}
           >
             {choice.label}
@@ -67,6 +70,7 @@ export function ResultsBar({
           className={cn(
             "shrink-0 tabular-nums text-sm text-muted-foreground",
             highContrast && "text-base text-white/80",
+            prominent && "text-xl text-white",
           )}
         >
           {choice.selections} · {pct.toFixed(1)}%
@@ -74,7 +78,7 @@ export function ResultsBar({
       </div>
       <Progress
         value={pct}
-        className={cn(highContrast && "h-3.5 bg-white/15")}
+        className={cn(highContrast && "h-3.5 bg-white/15", prominent && "h-5")}
         indicatorClassName={cn(
           winner && "bg-amber-500",
           highContrast && !winner && "bg-sky-400",

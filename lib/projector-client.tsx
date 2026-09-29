@@ -3,6 +3,7 @@
 import {
   Component,
   useEffect,
+  useState,
   useSyncExternalStore,
   type ReactNode,
 } from "react";
@@ -12,11 +13,14 @@ import type { FunctionReturnType } from "convex/server";
 import { Crown, Loader2 } from "lucide-react";
 
 import { api } from "@/convex/_generated/api";
+import { Confetti } from "@/components/polls/confetti";
 import { Countdown } from "@/components/polls/countdown";
 import { PresencePill } from "@/components/polls/presence-pill";
 import { QrBlock } from "@/components/polls/qr-block";
 import { ResultsBar } from "@/components/polls/results-bar";
 import { VotingStatusBadge } from "@/components/polls/status-badge";
+import { projectorBackgroundSrc } from "@/lib/background-presets";
+import { cn } from "@/lib/utils";
 
 type Props = { publicSlug: string; hostSecret: string };
 type AppErrorData = { code?: string; message?: string };
@@ -36,10 +40,32 @@ function errorMessage(error: unknown): string {
   return "Could not reach the event service. Check your connection and try again.";
 }
 
-function ProjectorShell({ children }: { children: ReactNode }) {
+function ProjectorShell({
+  backgroundUrl,
+  children,
+}: {
+  backgroundUrl?: string | null;
+  children: ReactNode;
+}) {
   return (
-    <div className="flex min-h-dvh flex-col bg-neutral-950 px-6 py-8 text-white sm:px-10">
-      {children}
+    <div className="relative flex min-h-dvh flex-col bg-neutral-950 text-white">
+      {backgroundUrl && (
+        <>
+          <div
+            className="absolute inset-0 bg-cover bg-center"
+            style={{ backgroundImage: `url("${backgroundUrl}")` }}
+            data-projector-background={backgroundUrl}
+            aria-hidden
+          />
+          <div
+            className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(0,0,0,0.84)_0%,rgba(0,0,0,0.68)_55%,rgba(0,0,0,0.5)_100%)]"
+            aria-hidden
+          />
+        </>
+      )}
+      <div className="relative z-10 flex min-h-dvh flex-col px-6 py-8 sm:px-10">
+        {children}
+      </div>
     </div>
   );
 }
@@ -135,11 +161,19 @@ function Projector({ publicSlug, hostSecret }: Props) {
     currentSlide.kind === "question"
       ? questions.find((question) => question._id === currentSlide.questionId)
       : undefined;
+  const backgroundUrl =
+    currentSlide.kind === "question" && currentQuestionResults
+      ? projectorBackgroundSrc(
+          currentQuestionResults.backgroundPreset,
+          currentQuestionResults.position,
+          currentQuestionResults.backgroundImageUrl,
+        )
+      : null;
 
   return (
-    <ProjectorShell>
+    <ProjectorShell backgroundUrl={backgroundUrl}>
       <header className="flex items-center justify-between">
-        <p className="text-lg font-medium text-white/70">{event.title}</p>
+        <p className="text-lg font-medium text-white/90">{event.title}</p>
         <PresencePill count={connectedCount} size="large" />
       </header>
 
@@ -151,6 +185,7 @@ function Projector({ publicSlug, hostSecret }: Props) {
         {event.currentSlide.kind === "question" &&
           (currentQuestionResults !== null ? (
             <QuestionSlide
+              key={`${currentQuestionResults.questionId}:${currentQuestionResults.votingState}`}
               question={currentQuestionResults}
               countdownSeconds={activeQuestion?.countdownSeconds}
               maxSelections={activeQuestion?.maxSelections}
@@ -203,8 +238,19 @@ function QuestionSlide({
   maxSelections: number | undefined;
   votingOpenedAt: number | undefined;
 }) {
+  const winners = question.choices.filter((choice) => choice.winner);
+  const closedWithWinner =
+    question.votingState === "closed" && winners.length > 0;
+  const [revealed, setRevealed] = useState(false);
+  useEffect(() => {
+    if (!closedWithWinner) return;
+    const frame = requestAnimationFrame(() => setRevealed(true));
+    return () => cancelAnimationFrame(frame);
+  }, [closedWithWinner]);
+
   return (
     <div className="flex w-full flex-col items-center gap-10">
+      <Confetti play={revealed} />
       <div className="flex items-center gap-4">
         <VotingStatusBadge state={question.votingState} />
         {question.votingState === "open" &&
@@ -223,25 +269,63 @@ function QuestionSlide({
         <img
           src={question.imageUrl}
           alt=""
-          className="max-h-72 rounded-xl border border-white/10 object-contain"
+          className="max-h-72 rounded-xl border border-white/20 object-contain shadow-lg"
         />
       )}
 
-      <h1 className="max-w-4xl text-balance text-center text-5xl font-semibold leading-tight">
+      <h1 className="max-w-4xl text-balance text-center text-5xl font-semibold leading-tight text-white drop-shadow-[0_2px_16px_rgba(0,0,0,0.85)]">
         {question.prompt}
       </h1>
 
+      {revealed && (
+        <p className="text-sm font-semibold uppercase tracking-[0.28em] text-amber-200">
+          {winners.length > 1 ? "It's a tie" : "Winner"}
+        </p>
+      )}
+
       {question.ballotCount === 0 ? (
-        <p className="text-lg text-white/50">Waiting for the first response…</p>
+        <p className="text-lg text-white/70">Waiting for the first response…</p>
       ) : (
-        <div className="flex w-full max-w-3xl flex-col gap-6">
-          {question.choices.map((choice) => (
-            <ResultsBar key={choice.choiceId} choice={choice} highContrast />
-          ))}
+        <div className="flex w-full max-w-3xl flex-col">
+          {question.choices.map((choice) => {
+            const winner = revealed && choice.winner;
+            const loser = revealed && !choice.winner;
+            return (
+              <div
+                key={choice.choiceId}
+                data-winner-focus={winner ? "true" : "false"}
+                className={cn(
+                  "grid transition-[grid-template-rows,opacity,transform] duration-700 ease-out motion-reduce:transition-none",
+                  loser
+                    ? "grid-rows-[0fr] scale-90 opacity-0"
+                    : "grid-rows-[1fr]",
+                  winner && "z-10 scale-110",
+                )}
+              >
+                <div
+                  className={cn(loser ? "overflow-hidden" : "overflow-visible")}
+                >
+                  <div
+                    className={cn(
+                      "py-3",
+                      winner &&
+                        "rounded-2xl bg-black/55 px-4 ring-2 ring-amber-300",
+                    )}
+                  >
+                    <ResultsBar
+                      choice={choice}
+                      highContrast
+                      prominent={winner}
+                    />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
-      <footer className="text-center text-sm text-white/40">
+      <footer className="text-center text-sm text-white/75">
         {question.ballotCount} ballot{question.ballotCount === 1 ? "" : "s"}{" "}
         submitted
         {maxSelections !== undefined &&
